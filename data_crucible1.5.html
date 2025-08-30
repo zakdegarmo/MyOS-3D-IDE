@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Data Crucible - MyOS</title>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+        }
+    }
+    </script>
+    <style>
+        /* Removed incorrect @font-face for Newton Sans_Regular.json */
+        /* If you have a standard .ttf, .woff, or .woff2 for Newton Sans, you can place it here: */
+        /* @font-face {
+            font-family: 'Newton Sans Regular';
+            src: url('path/to/NewtonSans-Regular.woff2') format('woff2');
+            font-weight: normal;
+            font-style: normal;
+        } */
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000000; /* Default black, will be overridden by JS for disco purple */
+            font-family: 'Inter', sans-serif; /* Use Inter font */
+            display: flex; /* Use flexbox for main layout */
+        }
+        #controls-panel {
+            /* flex: none; ensures it doesn't grow/shrink, maintains explicit width */
+            flex: none; 
+            width: 350px; /* Explicit width for the control panel */
+            background-color: rgba(17, 24, 39, 0.9);
+            padding: 15px;
+            border-right: 1px solid #374151;
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            height: 100vh; /* Take full viewport height */
+            overflow-y: auto;
+            color: #f3f4f6;
+            z-index: 10;
+            font-family: 'Inter', sans-serif; /* Use Inter font */
+            border-radius: 0 10px 10px 0; /* Rounded right corners */
+        }
+        #main-content {
+            flex: 1; /* Take up all remaining space */
+            position: relative; /* For loading overlay positioning */
+            overflow: hidden; /* Hide any overflow, preventing scrollbars/black bars */
+        }
+        canvas { 
+            display: block; 
+            width: 100%; /* Make canvas fill its parent container */
+            height: 100%;
+        }
+        .control-group {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #2d3748;
+        }
+        .control-group:last-child { border-bottom: none; }
+        h1, h2, h3 {
+            color: #8A2BE2; /* Royal Neon Purple for titles */
+            text-shadow: 0 0 5px #8A2BE2; /* Neon glow */
+        }
+        button {
+            width: 100%;
+            background: #6A0DAD; /* Darker purple for buttons */
+            border: none;
+            border-radius: 6px;
+            padding: 8px;
+            color: #f3f4f6;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, box-shadow 0.2s;
+            box-shadow: 0 0 5px rgba(138, 43, 226, 0.5); /* Button glow */
+        }
+        button:hover {
+            background-color: #5A0CA0; /* Even darker on hover */
+            box-shadow: 0 0 10px rgba(138, 43, 226, 0.8);
+        }
+        button:disabled {
+            background-color: #4b5563;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #4A0DA0; /* Purple slider track */
+            border-radius: 4px;
+            outline: none;
+            margin-top: 5px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #8A2BE2; /* Purple thumb */
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #f3f4f6;
+            box-shadow: 0 0 5px rgba(255,255,255,0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #8A2BE2;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #f3f4f6;
+            box-shadow: 0 0 5px rgba(255,255,255,0.5);
+        }
+        label {
+            font-size: 0.9em;
+            color: #B0A0D0; /* Lighter purple for labels */
+            margin-top: 10px;
+            display: block;
+        }
+        #info-box {
+            background-color: #1f2937;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            flex-grow: 1;
+            min-height: 100px;
+            max-height: 300px; /* Constrain height */
+            overflow-y: auto;
+            word-wrap: break-word;
+            border: 1px solid #4A0DA0; /* Purple border */
+            font-size: 0.85em;
+            box-shadow: inset 0 0 5px rgba(138, 43, 226, 0.2); /* Subtle inner glow */
+        }
+        #loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease-in-out;
+        }
+        #loading-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #4b5563;
+            border-top-color: #8A2BE2; /* Spinner matches purple theme */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #loading-text {
+            color: #f3f4f6;
+            margin-top: 1rem;
+            font-size: 1.1rem;
+        }
+        /* Collapsible Section Styles */
+        .collapsible-header {
+            background-color: #3A0D80; /* Darker purple for header */
+            color: #f3f4f6;
+            padding: 8px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            transition: background-color 0.2s;
+        }
+        .collapsible-header:hover {
+            background-color: #4A0DA0;
+        }
+        .collapsible-content {
+            padding: 5px 0;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out, padding 0.3s ease-out;
+            background-color: rgba(25, 30, 45, 0.7); /* Slightly lighter content background */
+            border-radius: 4px;
+        }
+        .collapsible-content.expanded {
+            max-height: 500px; /* Adjust as needed for content */
+            padding: 10px 0;
+        }
+        .arrow {
+            transition: transform 0.3s ease-out;
+        }
+        .arrow.expanded {
+            transform: rotate(90deg);
+        }
+        .input-group {
+            margin-bottom: 10px;
+            padding: 0 10px;
+        }
+        .input-group label {
+            margin-bottom: 3px;
+        }
+        .input-group select, .input-group input[type="color"] {
+            width: calc(100% - 20px); /* Adjust for padding */
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #4A0DA0;
+            background-color: #1f2937;
+            color: #f3f4f6;
+        }
+        .input-group input[type="text"] {
+            width: calc(100% - 20px);
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #4A0DA0;
+            background-color: #1f2937;
+            color: #f3f4f6;
+        }
+        .input-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 5px;
+        }
+        .flex-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 5px;
+        }
+        /* Styles for 2D labels */
+        .node-label {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent background */
+            padding: 3px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: 'Inter', sans-serif; /* Use Inter for readability */
+            font-size: 10px;
+            color: #FFFFFF;
+            text-shadow: 0px 0px 5px #8A2BE2;
+            pointer-events: none; /* Crucial: allows raycasting to hit the 3D object behind */
+            opacity: 0; /* Hidden by default */
+            transition: opacity 0.2s ease-in-out;
+        }
+        .node-label.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls-panel">
+        <h1 class="text-xl font-bold mb-3">The Data Crucible</h1>
+        <p class="text-sm text-gray-400 mb-4">Visualize and explore your ontological data in 3D. Welcome to the Data Disco!</p>
+
+        <div class="control-group">
+            <h2 class="text-lg font-semibold mb-2">1. Load Data Object</h2>
+            <input type="file" id="json-picker" accept=".json" style="display: none;">
+            <button id="load-json-btn">Load SKOS Index / JSON File</button>
+            <p class="text-sm text-gray-400 mt-2">Select your `skos_index.json` or any JSON file.</p>
+            <button id="open-file-dialog-btn" class="mt-2" disabled>Open File Dialog (Tkinter)</button>
+            <p class="text-sm text-gray-400 mt-2">Use this for multi-file selection or specific types (Backend required).</p>
+        </div>
+        
+        <div class="control-group">
+            <h2 class="text-lg font-semibold mb-2">2. Data Info</h2>
+            <div id="info-box">
+                <p id="info-placeholder" class="text-gray-400">Load a JSON file to see its details. Click a node in 3D for more info.</p>
+            </div>
+        </div>
+
+        <!-- Visual Mapping Controls -->
+        <div class="control-group">
+            <div class="collapsible-header" id="visual-mapping-header">
+                <h3>3. Visual Mapping Controls</h3>
+                <span class="arrow">></span>
+            </div>
+            <div class="collapsible-content" id="visual-mapping-content">
+                <div class="input-group">
+                    <label for="node-spacing-slider">Node Spacing:</label>
+                    <input type="range" id="node-spacing-slider" min="10" max="100" value="50">
+                </div>
+                <div class="input-group">
+                    <label for="node-size-slider">Node Size Scale:</label>
+                    <input type="range" id="node-size-slider" min="0.1" max="5" value="1" step="0.1">
+                </div>
+                <div class="input-group">
+                    <label for="depth-effect-slider">Depth Effect (Y-Axis Spread):</label>
+                    <input type="range" id="depth-effect-slider" min="0" max="1" value="0.5" step="0.05">
+                </div>
+                
+                <div class="input-group">
+                    <label for="node-shape-select">Node Shape:</label>
+                    <select id="node-shape-select">
+                        <!-- Options populated by JS -->
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="node-color-select">Node Color Source:</label>
+                    <select id="node-color-select">
+                        <option value="fixed">Fixed Color</option>
+                        <option value="pillar">Pillar Assignment</option>
+                        <option value="depth">Depth Gradient</option>
+                        <option value="type">Data Type</option>
+                    </select>
+                    <div id="fixed-color-input" class="flex-row mt-2">
+                        <label for="fixed-color-picker">Fixed Color:</label>
+                        <input type="color" id="fixed-color-picker" value="#FFFF00">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="connection-type-select">Connection Type:</label>
+                    <select id="connection-type-select">
+                        <option value="none">None</option>
+                        <option value="hierarchy">Hierarchy (Parent/Child)</option>
+                        <option value="skos">SKOS Relationships</option>
+                        <option value="custom">Custom (e.g., Services/Processes)</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="connection-color-select">Connection Color Source:</label>
+                    <select id="connection-color-select">
+                        <option value="fixed">Fixed Color</option>
+                        <option value="gradient">Age Gradient (ROYGBIV)</option>
+                        <option value="type">Relationship Type</option>
+                    </select>
+                    <div id="fixed-connection-color-input" class="flex-row mt-2">
+                        <label for="fixed-connection-color-picker">Fixed Color:</label>
+                        <input type="color" id="fixed-connection-color-picker" value="#4b5563">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Data Manipulation / LLM Integration -->
+        <div class="control-group">
+            <div class="collapsible-header" id="advanced-data-header">
+                <h3>4. Advanced Data & LLM</h3>
+                <span class="arrow">></span>
+            </div>
+            <div class="collapsible-content" id="advanced-data-content">
+                <div class="input-group">
+                    <label for="data-query-input">Data Query (LLM Integration):</label>
+                    <input type="text" id="data-query-input" placeholder="e.g., 'invoices from last month with metrics A,B,Q'">
+                    <button id="run-query-btn" class="mt-2" disabled>Run Query & Visualize</button>
+                    <p class="text-sm text-gray-400 mt-2">Visualize data transformation based on your query (Backend required).</p>
+                </div>
+                <div class="input-group">
+                    <label>LLM Semantic Analysis:</label>
+                    <button id="analyze-node-btn" class="mt-2" disabled>Analyze Selected Node</button>
+                    <p class="text-sm text-gray-400 mt-2">Get deeper LLM insights on clicked data (Backend required).</p>
+                </div>
+                <div class="input-group">
+                    <label>Live Web Scraping (URI Pointers):</label>
+                    <button id="start-scraper-btn" class="mt-2" disabled>Start Semantic Scraper</button>
+                    <input type="text" id="scrape-url-input" placeholder="URL to scrape" class="mt-2" disabled>
+                    <p class="text-sm text-gray-400 mt-2">Visualize data from live web content (Backend required).</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="main-content" style="flex-grow: 1; position: relative;">
+        <canvas id="renderCanvas"></canvas>
+        <div id="loading-overlay">
+            <div class="spinner"></div>
+            <p id="loading-text">Processing...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js'; // For text labels
+
+        // --- Three.js Global Variables ---
+        let camera, scene, renderer, controls;
+        let dataGroup = new THREE.Group(); // Group to hold all 3D representations of JSON data
+        let currentLoadedData = null; // Stores the parsed JSON object (e.g., skos_index.json)
+        let raycaster, mouse;
+        let labelRenderer; // For 2D text labels
+        let hoveredObject = null; // Track the currently hovered 3D object
+
+        // --- UI Element References ---
+        const loadJsonBtn = document.getElementById('load-json-btn');
+        const jsonPicker = document.getElementById('json-picker');
+        const openFileDialogBtn = document.getElementById('open-file-dialog-btn');
+        const infoBox = document.getElementById('info-box');
+        const nodeSpacingSlider = document.getElementById('node-spacing-slider');
+        const nodeSizeSlider = document.getElementById('node-size-slider');
+        const depthEffectSlider = document.getElementById('depth-effect-slider');
+        const nodeShapeSelect = document.getElementById('node-shape-select');
+        const nodeColorSelect = document.getElementById('node-color-select');
+        const fixedColorInput = document.getElementById('fixed-color-input');
+        const fixedColorPicker = document.getElementById('fixed-color-picker');
+        const connectionTypeSelect = document.getElementById('connection-type-select');
+        const connectionColorSelect = document.getElementById('connection-color-select');
+        const fixedConnectionColorInput = document.getElementById('fixed-connection-color-input');
+        const fixedConnectionColorPicker = document.getElementById('fixed-connection-color-picker');
+        const dataQueryInput = document.getElementById('data-query-input');
+        const runQueryBtn = document.getElementById('run-query-btn');
+        const analyzeNodeBtn = document.getElementById('analyze-node-btn');
+        const startScraperBtn = document.getElementById('start-scraper-btn');
+        const scrapeUrlInput = document.getElementById('scrape-url-input');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingText = document.getElementById('loading-text');
+        const renderCanvas = document.getElementById('renderCanvas');
+
+        // Collapsible headers
+        const visualMappingHeader = document.getElementById('visual-mapping-header');
+        const visualMappingContent = document.getElementById('visual-mapping-content');
+        const advancedDataHeader = document.getElementById('advanced-data-header');
+        const advancedDataContent = document.getElementById('advanced-data-content');
+
+        // --- Constants and Materials ---
+        const ROYAL_NEON_PURPLE = 0x8A2BE2; // For background
+        const NODE_DEFAULT_COLOR = new THREE.Color(0xffff00); // Default yellow wireframe
+        const CONNECTION_DEFAULT_COLOR = new THREE.Color(0x4b5563); // Default gray
+
+        // Pillar Colors (for 'pillar' color source) - these are example colors, can be refined
+        const PILLAR_COLORS = {
+            "SELF": new THREE.Color(0xFF00FF),       // Magenta
+            "THOUGHT": new THREE.Color(0x00FFFF),    // Cyan
+            "LOGIC": new THREE.Color(0x00FF00),      // Green
+            "UNITY": new THREE.Color(0xFFFF00),      // Yellow
+            "EXISTENCE": new THREE.Color(0xFF8C00),  // Dark Orange
+            "IMPROVEMENT": new THREE.Color(0xFF0000),// Red
+            "MASTERY": new THREE.Color(0x800080),    // Purple
+            "RESONANCE": new THREE.Color(0x00BFFF),  // Deep Sky Blue
+            "TRANSCENDENCE": new THREE.Color(0xFFD700) // Gold
+        };
+
+        // --- Initialization ---
+        function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(ROYAL_NEON_PURPLE); // Data Disco Background!
+            scene.fog = new THREE.FogExp2(0x000000, 0.005); // Black fog
+
+            // Renderer Setup
+            renderer = new THREE.WebGLRenderer({ canvas: renderCanvas, antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth - 350, window.innerHeight); // Adjust for wider panel
+            // document.body.appendChild(renderer.domElement); // Already in HTML
+
+            // Label Renderer for 2D HTML labels
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth - 350, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.left = '350px'; /* Position label renderer next to panel */
+            labelRenderer.domElement.style.pointerEvents = 'none'; // Crucial: allows raycasting to hit the 3D object behind
+            document.body.appendChild(labelRenderer.domElement);
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(75, (window.innerWidth - 350) / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, 0, 100);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 1;
+            controls.maxDistance = 1000;
+
+            // Lights
+            scene.add(new THREE.AmbientLight(0x444444, 0.5));
+            scene.add(new THREE.PointLight(0xffffff, 1, 1000));
+
+            // Add the main data group to the scene
+            scene.add(dataGroup);
+
+            // Raycaster for interactivity
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // --- Event Listeners ---
+            window.addEventListener('resize', onWindowResize);
+            loadJsonBtn.addEventListener('click', () => jsonPicker.click());
+            jsonPicker.addEventListener('change', handleJsonFileLoad);
+            renderCanvas.addEventListener('mousemove', onMouseMove, false);
+            renderCanvas.addEventListener('click', onClick, false);
+
+            // Collapsible headers
+            visualMappingHeader.addEventListener('click', () => toggleCollapsible(visualMappingContent, visualMappingHeader));
+            advancedDataHeader.addEventListener('click', () => toggleCollapsible(advancedDataContent, advancedDataHeader));
+
+            // Initial state of collapsible menus
+            visualMappingContent.classList.add('expanded'); // Start expanded
+            advancedDataContent.classList.remove('expanded'); // Start collapsed
+
+            // Sliders and dropdowns for dynamic visualization updates
+            nodeSpacingSlider.addEventListener('input', updateVisualization);
+            nodeSizeSlider.addEventListener('input', updateVisualization);
+            depthEffectSlider.addEventListener('input', updateVisualization);
+            nodeShapeSelect.addEventListener('change', updateVisualization);
+            nodeColorSelect.addEventListener('change', updateVisualization);
+            fixedColorPicker.addEventListener('input', updateVisualization); // Real-time update for color picker
+            connectionTypeSelect.addEventListener('change', updateVisualization);
+            connectionColorSelect.addEventListener('change', updateVisualization);
+            fixedConnectionColorPicker.addEventListener('input', updateVisualization);
+
+            // Initial visibility for fixed color pickers
+            fixedColorInput.style.display = nodeColorSelect.value === 'fixed' ? 'flex' : 'none';
+            fixedConnectionColorInput.style.display = connectionColorSelect.value === 'fixed' ? 'flex' : 'none';
+            nodeColorSelect.addEventListener('change', () => {
+                fixedColorInput.style.display = nodeColorSelect.value === 'fixed' ? 'flex' : 'none';
+            });
+            connectionColorSelect.addEventListener('change', () => {
+                fixedConnectionColorInput.style.display = connectionColorSelect.value === 'fixed' ? 'flex' : 'none';
+            });
+
+            // Populate shape dropdown
+            populateShapeSelect();
+
+            // LLM & Scraper buttons (disabled placeholders for now)
+            openFileDialogBtn.addEventListener('click', () => alert("Tkinter File Dialog requires backend integration."));
+            runQueryBtn.addEventListener('click', () => alert("Data Query requires LLM backend integration."));
+            analyzeNodeBtn.addEventListener('click', () => alert("LLM Semantic Analysis requires LLM integration."));
+            startScraperBtn.addEventListener('click', () => alert("Web Scraping requires backend integration."));
+        }
+
+        // --- Helper Functions ---
+        function showLoading(isLoading, text = "Processing data...") {
+            loadingText.textContent = text;
+            if (isLoading) {
+                loadingOverlay.classList.add('visible');
+            } else {
+                loadingOverlay.classList.remove('visible');
+            }
+        }
+
+        function clearVisualization() {
+            // Clear all 3D objects
+            while (dataGroup.children.length > 0) {
+                const child = dataGroup.children[0];
+                dataGroup.remove(child);
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                // Recursively remove CSS2DObjects if they are children of the 3D object
+                child.traverse(obj => {
+                    if (obj instanceof CSS2DObject) {
+                        if (obj.element && obj.element.parentNode) {
+                            obj.element.parentNode.removeChild(obj.element);
+                        }
+                    }
+                });
+            }
+            // Ensure any stray labels are removed from the DOM
+            document.querySelectorAll('.node-label').forEach(label => label.remove());
+        }
+
+        function onWindowResize() {
+            // Calculate new dimensions based on current window size and fixed panel width
+            const panelWidth = 350; // Fixed width of the controls panel
+            const newWidth = window.innerWidth - panelWidth;
+            const newHeight = window.innerHeight;
+
+            // Update camera aspect ratio and projection matrix
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+
+            // Update renderer size
+            renderer.setSize(newWidth, newHeight);
+            labelRenderer.setSize(newWidth, newHeight); // Update label renderer size
+
+            // Reposition labelRenderer's DOM element next to the panel
+            labelRenderer.domElement.style.left = panelWidth + 'px'; 
+        }
+
+        function toggleCollapsible(contentElement, headerElement) {
+            contentElement.classList.toggle('expanded');
+            headerElement.querySelector('.arrow').classList.toggle('expanded');
+        }
+
+        function populateShapeSelect() {
+            const shapes = [
+                { value: 'sphere', label: 'Sphere' },
+                { value: 'box', label: 'Box' },
+                { value: 'icosahedron', label: 'Icosahedron' },
+                { value: 'cone', label: 'Cone' },
+                { value: 'torus', label: 'Torus' },
+                { value: 'tetrahedron', label: 'Tetrahedron' },
+                { value: 'octahedron', label: 'Octahedron' },
+                { value: 'cylinder', label: 'Cylinder' },
+                { value: 'torusknot', label: 'TorusKnot' }
+            ];
+            nodeShapeSelect.innerHTML = ''; // Clear existing options
+            shapes.forEach(shape => {
+                const option = document.createElement('option');
+                option.value = shape.value;
+                option.textContent = shape.label;
+                nodeShapeSelect.appendChild(option);
+            });
+        }
+
+        // --- Data Loading and Parsing ---
+        async function handleJsonFileLoad(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            showLoading(true, `Loading ${file.name}...`);
+            infoBox.innerHTML = `<p id="info-placeholder" class="text-gray-400">Loading ${file.name}...</p>`;
+
+            try {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        currentLoadedData = JSON.parse(e.target.result);
+                        console.log("JSON loaded:", currentLoadedData);
+                        // Display basic info, full details on node click
+                        infoBox.innerHTML = `
+                            <p><strong>File:</strong> ${file.name}</p>
+                            <p><strong>Size:</strong> ${file.size} bytes</p>
+                            <p><strong>Root Type:</strong> ${Array.isArray(currentLoadedData) ? 'Array' : 'Object'}</p>
+                            <p><strong>Top-level Elements:</strong> ${Array.isArray(currentLoadedData) ? currentLoadedData.length : Object.keys(currentLoadedData).length}</p>
+                            <p class="text-gray-400 mt-2">Click a node in 3D for more detailed info.</p>
+                        `;
+                        updateVisualization(); // Visualize the loaded data
+                    } catch (parseError) {
+                        infoBox.innerHTML = `<p style="color:red;">Error parsing JSON: ${parseError.message}</p>`;
+                        console.error("Error parsing JSON:", parseError);
+                    } finally {
+                        showLoading(false);
+                    }
+                };
+                reader.readAsText(file);
+            } catch (readError) {
+                infoBox.innerHTML = `<p style="color:red;">Error reading file: ${readError.message}</p>`;
+                console.error("Error reading file:", readError);
+                showLoading(false);
+            }
+        }
+
+        // --- Visualization Logic ---
+        function updateVisualization() {
+            clearVisualization();
+            if (!currentLoadedData) {
+                return;
+            }
+
+            showLoading(true, "Updating visualization...");
+
+            const spacing = parseFloat(nodeSpacingSlider.value);
+            const sizeScale = parseFloat(nodeSizeSlider.value);
+            const depthEffect = parseFloat(depthEffectSlider.value);
+            const selectedShape = nodeShapeSelect.value;
+            const colorSource = nodeColorSelect.value;
+            const fixedColor = new THREE.Color(fixedColorPicker.value);
+            const connectionType = connectionTypeSelect.value;
+            const connectionColorSource = connectionColorSelect.value;
+            const fixedConnectionColor = new THREE.Color(fixedConnectionColorPicker.value);
+
+            // Function to get node color based on source
+            const getNodeColor = (nodeData, depth) => {
+                if (colorSource === 'fixed') {
+                    return fixedColor;
+                } else if (colorSource === 'pillar' && nodeData.pillars && nodeData.pillars.length > 0) {
+                    // Use the color of the first assigned pillar
+                    return PILLAR_COLORS[nodeData.pillars[0]] || NODE_DEFAULT_COLOR;
+                } else if (colorSource === 'depth') {
+                    // Create a gradient based on depth (e.g., from purple to yellow)
+                    const color = new THREE.Color();
+                    // Max depth for gradient could be dynamic or fixed. Let's use 5 as a max for now.
+                    const maxDepthForGradient = 5; 
+                    const hue = (depth / maxDepthForGradient) * 0.75; // 0.75 to stay within a good spectrum
+                    color.setHSL(hue, 1, 0.5);
+                    return color;
+                } else if (colorSource === 'type') {
+                    // Assign colors based on data type (primitive, array, object, skosConcept)
+                    if (nodeData.type === 'object') return new THREE.Color(0xFF00FF); // Magenta
+                    if (nodeData.type === 'array') return new THREE.Color(0x00FFFF);  // Cyan
+                    if (nodeData.type === 'primitive') return new THREE.Color(0x00FF00); // Green
+                    if (nodeData.type === 'skosConcept') return new THREE.Color(0xFFA500); // Orange for SKOS concepts
+                    return NODE_DEFAULT_COLOR;
+                }
+                return NODE_DEFAULT_COLOR;
+            };
+
+            // Function to get connection color based on source
+            const getConnectionColor = (depth) => {
+                if (connectionColorSource === 'fixed') {
+                    return fixedConnectionColor;
+                } else if (connectionColorSource === 'gradient') {
+                    // ROYGBIV gradient based on depth for connections
+                    const color = new THREE.Color();
+                    const maxDepthForGradient = 5; 
+                    const hue = (depth / maxDepthForGradient) * 0.8; // 0.8 to stay within ROYGBIV range
+                    color.setHSL(hue, 1, 0.5);
+                    return color;
+                }
+                return CONNECTION_DEFAULT_COLOR;
+            };
+
+            // Recursive function to visualize nodes
+            function visualizeNode(nodeDataWrapper, parentGroup, depth, position, spacing, sizeScale, depthEffect, getNodeColor, selectedShape) {
+                let geometry, material, mesh;
+                let nodeBaseSize = 1;
+                let currentPosition = new THREE.Vector3().copy(position);
+
+                // Apply depth effect to position
+                currentPosition.y -= depth * spacing * depthEffect;
+                currentPosition.x += (depth % 2 === 0 ? 1 : -1) * depth * spacing * 0.1; // Slight spiral effect
+
+                const nodeColor = getNodeColor(nodeDataWrapper.userData, depth);
+
+                // Determine base size based on type/content
+                if (nodeDataWrapper.userData.type === 'array') {
+                    nodeBaseSize = Math.max(1, Math.log10(nodeDataWrapper.data.length + 1)) * 5;
+                } else if (nodeDataWrapper.userData.type === 'object') {
+                    nodeBaseSize = Math.max(1, Math.log10(Object.keys(nodeDataWrapper.data).length + 1)) * 7;
+                } else if (nodeDataWrapper.userData.type === 'primitive') {
+                    nodeBaseSize = 1 + (String(nodeDataWrapper.data).length * 0.1);
+                } else if (nodeDataWrapper.userData.type === 'skosConcept') {
+                    nodeBaseSize = 1 + (String(nodeDataWrapper.userData.prefLabel).length * 0.05); // Size based on label length
+                }
+
+                geometry = getShapeGeometry(selectedShape, nodeBaseSize);
+                material = new THREE.MeshBasicMaterial({ color: nodeColor, wireframe: true });
+                mesh = new THREE.Mesh(geometry, material);
+                mesh.position.copy(currentPosition);
+                mesh.userData = nodeDataWrapper.userData; // Store all relevant data in userData
+                mesh.originalData = nodeDataWrapper.data; // Store original raw data for display
+                dataGroup.add(mesh); // Add to dataGroup, not parentGroup directly for consistent raycasting
+
+                // Add 2D label for SKOS concepts or object keys
+                let labelText = '';
+                if (nodeDataWrapper.userData.type === 'skosConcept' && nodeDataWrapper.userData.prefLabel) {
+                    labelText = nodeDataWrapper.userData.prefLabel;
+                } else if (nodeDataWrapper.userData.key) { // For object keys
+                    labelText = nodeDataWrapper.userData.key;
+                } else if (nodeDataWrapper.userData.type === 'primitive') {
+                    labelText = String(nodeDataWrapper.userData.value).substring(0, 20); // Show first 20 chars of primitive
+                }
+
+                if (labelText) {
+                    const labelDiv = document.createElement('div');
+                    labelDiv.className = 'node-label';
+                    labelDiv.textContent = labelText;
+                    const cssLabel = new CSS2DObject(labelDiv);
+                    // Position label slightly above the node's top edge, scaled by node size and global sizeScale
+                    // Adjusted Y position to ensure it's always visible and not clipping into the node
+                    cssLabel.position.set(0, (nodeBaseSize * sizeScale / 2) + 0.5, 0); 
+                    cssLabel.element.style.opacity = 0; // Hidden by default
+                    mesh.add(cssLabel); // Attach label to the 3D mesh
+                    mesh.userData.cssLabel = cssLabel; // Store reference to the label for easy access
+                }
+
+
+                // Recursively visualize children/elements
+                if (nodeDataWrapper.userData.type === 'array') {
+                    const elementCount = nodeDataWrapper.data.length;
+                    const orbitRadius = nodeBaseSize * 2;
+                    for (let i = 0; i < elementCount; i++) {
+                        const element = nodeDataWrapper.data[i];
+                        const angle = (i / elementCount) * Math.PI * 2;
+                        const elementPos = new THREE.Vector3(
+                            Math.cos(angle) * orbitRadius,
+                            Math.sin(angle) * orbitRadius * 0.5,
+                            Math.sin(angle) * orbitRadius
+                        ).add(currentPosition);
+                        visualizeNode({ data: element, userData: { parent: nodeDataWrapper.userData, type: typeof element === 'object' && element !== null ? (Array.isArray(element) ? 'array' : 'object') : 'primitive' } }, dataGroup, depth + 1, elementPos, spacing, sizeScale * 0.5, depthEffect, getNodeColor, selectedShape);
+                        
+                        // Draw connection line
+                        if (connectionType !== 'none') {
+                            const lineMaterial = new THREE.LineBasicMaterial({ color: getConnectionColor(depth) });
+                            const points = [ mesh.position, elementPos ];
+                            const geometryLine = new THREE.BufferGeometry().setFromPoints(points);
+                            dataGroup.add(new THREE.Line(geometryLine, lineMaterial));
+                        }
+                    }
+                } else if (nodeDataWrapper.userData.type === 'object') {
+                    const keys = Object.keys(nodeDataWrapper.data);
+                    const orbitRadius = nodeBaseSize * 1.8;
+                    for (let i = 0; i < keys.length; i++) {
+                        const key = keys[i];
+                        const child = nodeDataWrapper.data[key];
+
+                        const angle = (i / keys.length) * Math.PI * 2;
+                        const childPos = new THREE.Vector3(
+                            Math.cos(angle) * orbitRadius,
+                            0,
+                            Math.sin(angle) * orbitRadius
+                        ).add(currentPosition);
+                        visualizeNode({ data: child, userData: { parent: nodeDataWrapper.userData, key: key, type: typeof child === 'object' && child !== null ? (Array.isArray(child) ? 'array' : 'object') : 'primitive' } }, dataGroup, depth + 1, childPos, spacing, sizeScale * 0.6, depthEffect, getNodeColor, selectedShape);
+                        
+                        // Draw connection line
+                        if (connectionType !== 'none') {
+                            const lineMaterial = new THREE.LineBasicMaterial({ color: getConnectionColor(depth) });
+                            const points = [ mesh.position, childPos ];
+                            const geometryLine = new THREE.BufferGeometry().setFromPoints(points);
+                            dataGroup.add(new THREE.Line(geometryLine, lineMaterial));
+                        }
+                    }
+                }
+                // Apply global size scale (already done in individual node creation)
+                // mesh.scale.multiplyScalar(sizeScale); // Removed to avoid double scaling
+            }
+
+            // Helper to get geometry based on selected shape
+            function getShapeGeometry(shapeName, size) {
+                switch (shapeName) {
+                    case 'sphere': return new THREE.SphereGeometry(size, 32, 16);
+                    case 'box': return new THREE.BoxGeometry(size, size, size);
+                    case 'icosahedron': return new THREE.IcosahedronGeometry(size, 0);
+                    case 'cone': return new THREE.ConeGeometry(size, size * 2, 32);
+                    case 'torus': return new THREE.TorusGeometry(size * 1.5, size * 0.5, 16, 100);
+                    case 'tetrahedron': return new THREE.TetrahedronGeometry(size);
+                    case 'octahedron': return new THREE.OctahedronGeometry(size);
+                    case 'cylinder': return new THREE.CylinderGeometry(size, size, size * 2, 32);
+                    case 'torusknot': return new THREE.TorusKnotGeometry(size, size * 0.3, 64, 8);
+                    default: return new THREE.SphereGeometry(size, 32, 16);
+                }
+            }
+
+            // --- Main Visualization Trigger ---
+            // This function now expects currentLoadedData to be the skos_index.json format
+            // or a general JSON object/array.
+            if (Array.isArray(currentLoadedData) && currentLoadedData[0] && currentLoadedData[0].notation_numerical) {
+                // Assume it's the SKOS index
+                const totalNodes = currentLoadedData.length;
+                const radius = spacing * Math.sqrt(totalNodes) / (2 * Math.PI) * 0.5; // Adjust radius based on count, make tighter
+                let i = 0;
+                currentLoadedData.forEach(skosConcept => {
+                    const angle = (i / totalNodes) * Math.PI * 2;
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    const y = (i % 10 - 5) * spacing * 0.1; // Spread vertically across 10 levels
+
+                    const nodeData = {
+                        data: skosConcept, // The actual SKOS object
+                        notation_numerical: skosConcept.notation_numerical,
+                        notation_original: skosConcept.notation_original,
+                        prefLabel: skosConcept.prefLabel,
+                        file_path_relative: skosConcept.file_path_relative,
+                        broader_category_identifier: skosConcept.broader_category_identifier,
+                        content_hash: skosConcept.content_hash,
+                        pillars: skosConcept.Pillars, // Assuming your DDC-Onto mapping is merged here
+                        type: 'skosConcept' // Custom type for SKOS entries
+                    };
+                    visualizeNode(
+                        { data: skosConcept, userData: nodeData }, // Pass data and userData separately
+                        dataGroup, 
+                        0, // All top-level SKOS concepts are at depth 0 conceptually
+                        new THREE.Vector3(x, y, z), 
+                        spacing, 
+                        sizeScale, 
+                        depthEffect, 
+                        getNodeColor, 
+                        selectedShape
+                    );
+                    i++;
+                });
+            } else {
+                // For general JSON objects/arrays (like the old Data Crucible)
+                visualizeNode({ data: currentLoadedData, userData: { type: Array.isArray(currentLoadedData) ? 'array' : 'object' } }, dataGroup, 0, new THREE.Vector3(0, 0, 0), spacing, sizeScale, depthEffect, getNodeColor, selectedShape);
+            }
+
+            // Adjust camera to view the whole scene
+            const boundingBox = new THREE.Box3().setFromObject(dataGroup);
+            const center = new THREE.Vector3();
+            boundingBox.getCenter(center);
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+            cameraZ *= 1.5; // Add some padding
+            camera.position.set(center.x, center.y, center.z + cameraZ);
+            controls.target.copy(center);
+            controls.update();
+
+            showLoading(false, "Visualization complete!");
+        }
+
+        // --- Interactivity (Raycasting) ---
+        function onMouseMove(event) {
+            event.preventDefault();
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            // Update hovered object
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(dataGroup.children, true);
+
+            if (hoveredObject) {
+                // Hide previous hovered object's label
+                if (hoveredObject.userData.cssLabel) {
+                    hoveredObject.userData.cssLabel.element.style.opacity = 0;
+                }
+                hoveredObject = null;
+            }
+
+            if (intersects.length > 0) {
+                const intersected = intersects[0].object;
+                // Find the actual mesh that has the userData and label
+                let targetMesh = intersected;
+                // Traverse up the hierarchy until we find the mesh that has the cssLabel attached
+                // This is important because raycasting can hit child meshes (e.g., individual cubes in a BoxGeometry)
+                while (targetMesh && !targetMesh.userData.cssLabel && targetMesh.parent) {
+                    targetMesh = targetMesh.parent;
+                }
+
+                if (targetMesh && targetMesh.userData.cssLabel) {
+                    hoveredObject = targetMesh;
+                    hoveredObject.userData.cssLabel.element.style.opacity = 1; // Show label
+                }
+            }
+        }
+
+        function onClick() {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(dataGroup.children, true); // True for recursive check
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                // Find the actual mesh that has the userData
+                let targetMesh = clickedObject;
+                while (targetMesh && !targetMesh.userData.type && targetMesh.parent) {
+                    targetMesh = targetMesh.parent;
+                }
+
+                if (targetMesh) {
+                    const data = targetMesh.userData;
+                    const originalData = targetMesh.originalData; // Access original raw data
+                    displayNodeInfo(data, originalData);
+                } else {
+                     displayNodeInfo(null); // Clear info if no valid object clicked
+                }
+            } else {
+                displayNodeInfo(null); // Clear info if no object clicked
+            }
+        }
+
+        function displayNodeInfo(data, originalData = null) {
+            if (!data) {
+                infoBox.innerHTML = `<p id="info-placeholder" class="text-gray-400">Load a JSON file to see its details. Click a node in 3D for more info.</p>`;
+                return;
+            }
+
+            let html = `<p><strong>Type:</strong> ${data.type}</p>`;
+            if (data.type === 'skosConcept') {
+                html += `<p><strong>Notation:</strong> ${data.notation_original} (${data.notation_numerical})</p>`;
+                html += `<p><strong>Label:</strong> ${data.prefLabel}</p>`;
+                if (data.pillars && data.pillars.length > 0) {
+                    html += `<p><strong>Pillars:</strong> ${data.pillars.join(', ')}</p>`;
+                } else {
+                    html += `<p><strong>Pillars:</strong> Not mapped</p>`;
+                }
+                html += `<p><strong>Relative Path:</strong> ${data.file_path_relative}</p>`;
+                html += `<p><strong>Broader ID:</strong> ${data.broader_category_identifier}</p>`;
+                html += `<p><strong>Content Hash:</strong> ${data.content_hash ? data.content_hash.substring(0, 10) + '...' : 'N/A'}</p>`;
+            } else if (data.type === 'object') {
+                html += `<p><strong>Keys:</strong> ${data.keys.length}</p>`;
+                html += `<p><strong>Keys:</strong> ${data.keys.join(', ')}</p>`;
+            } else if (data.type === 'array') {
+                html += `<p><strong>Length:</strong> ${data.length}</p>`;
+            } else { // Primitive
+                html += `<p><strong>Value:</strong> ${String(data.value).substring(0, 100)}...</p>`;
+            }
+            html += `<p><strong>Depth:</strong> ${data.depth}</p>`;
+            
+            // Add raw JSON for context if it's not too large
+            if (originalData && typeof originalData === 'object' && JSON.stringify(originalData).length < 2000) { 
+                 html += `<hr style="border-color:#2d3748; margin: 10px 0;">`; 
+                 html += `<pre style="white-space: pre-wrap; word-wrap: break-word; font-size:0.8rem; max-height: 200px; overflow-y: auto;">${JSON.stringify(originalData, null, 2)}</pre>`;
+            }
+            infoBox.innerHTML = html;
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            labelRenderer.render(scene, camera); // Render 2D labels
+            renderer.render(scene, camera);
+        }
+
+        // --- Initialize and Start ---
+        init();
+        animate();
+    </script>
+</body>
+</html>

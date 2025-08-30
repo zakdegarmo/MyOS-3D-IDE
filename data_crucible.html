@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Data Crucible - MyOS</title>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/",
+            "d3-force-3d": "https://esm.sh/d3-force-3d@3.0.4"
+        }
+    }
+    </script>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+        body {
+            background-color: #000000; /* Match theme */
+            font-family: 'Inter', sans-serif;
+        }
+        /* Ensure the container and canvas fill the entire viewport of the iframe */
+        #main-content, #renderCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .node-label {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 3px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: 'Inter', sans-serif;
+            font-size: 10px;
+            color: #FFFFFF;
+            text-shadow: 0px 0px 5px #8A2BE2;
+            pointer-events: none;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="main-content">
+        <canvas id="renderCanvas"></canvas>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import * as d3 from 'd3-force-3d';
+
+        let camera, scene, renderer, controls, labelRenderer;
+        let raycaster, mouse;
+        
+        let dataGroup = new THREE.Group();
+        let centralPointCloud = null;
+        let stars, pointLight1, pointLight2;
+
+        let graphNodes = [];
+        let graphLinks = [];
+        let nodeMeshes = {};
+        let linkLines = [];
+        let forceSimulation;
+        let focusedNode = null;
+        let modulatorData = null; // To store data from the main scene
+
+        const renderCanvas = document.getElementById('renderCanvas');
+        const mainContent = document.getElementById('main-content');
+
+        const NODE_DEFAULT_COLOR = new THREE.Color(0xffff00);
+        const PILLAR_COLORS = {
+            'SELF': new THREE.Color(0xFF00FF), 'THOUGHT': new THREE.Color(0x00FFFF),
+            'LOGIC': new THREE.Color(0x00FF00), 'UNITY': new THREE.Color(0xFFFF00),
+            'EXISTENCE': new THREE.Color(0xFF8C00), 'IMPROVEMENT': new THREE.Color(0xFF0000),
+            'MASTERY': new THREE.Color(0x800080), 'RESONANCE': new THREE.Color(0x00BFFF),
+            'TRANSCENDENCE': new THREE.Color(0xFFD700), 'NOTHING/EVERYTHING': new THREE.Color(0xFFFFFF),
+        };
+        const basePillarColors = {};
+        Object.keys(PILLAR_COLORS).forEach(key => {
+            basePillarColors[key] = PILLAR_COLORS[key].clone();
+        });
+
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            scene.fog = new THREE.FogExp2(0x000000, 0.005);
+
+            renderer = new THREE.WebGLRenderer({ canvas: renderCanvas, antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            // NOTE: Initial size is not set here. It will be set by the first 'resize' message.
+
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.pointerEvents = 'none';
+            mainContent.appendChild(labelRenderer.domElement);
+
+            camera = new THREE.PerspectiveCamera(75, 1, 0.1, 2000);
+            camera.position.set(0, 40, 120);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // --- Dynamic Lighting & Background ---
+            scene.add(new THREE.HemisphereLight(0x300050, 0x000020, 1)); // Purple to dark blue ambient
+            const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            keyLight.position.set(50, 50, 50);
+            scene.add(keyLight);
+
+            pointLight1 = new THREE.PointLight(0xff00ff, 2, 300); // Magenta
+            scene.add(pointLight1);
+            pointLight2 = new THREE.PointLight(0x00ffff, 2, 300); // Cyan
+            scene.add(pointLight2);
+            
+            // Starfield
+            const starVertices = [];
+            for (let i = 0; i < 10000; i++) {
+                const x = THREE.MathUtils.randFloatSpread(2000);
+                const y = THREE.MathUtils.randFloatSpread(2000);
+                const z = THREE.MathUtils.randFloatSpread(2000);
+                starVertices.push(x, y, z);
+            }
+            const starGeometry = new THREE.BufferGeometry();
+            starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+            const starMaterial = new THREE.PointsMaterial({ color: 0xaaaaaa, size: 0.7 });
+            stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+
+
+            scene.add(dataGroup);
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            renderCanvas.addEventListener('click', onClick, false);
+        }
+
+        function setupGraphFromMatrix(matrix) {
+            graphNodes = Object.keys(matrix).map(name => ({ id: name, relationships: matrix[name] }));
+            graphLinks = [];
+            
+            graphNodes.forEach(sourceNode => {
+                Object.keys(sourceNode.relationships).forEach(targetNodeId => {
+                    if (matrix[targetNodeId]) {
+                        graphLinks.push({ source: sourceNode.id, target: targetNodeId });
+                    }
+                });
+            });
+
+            createGraphObjects();
+            setupForceSimulation();
+        }
+
+        function createGraphObjects() {
+            dataGroup.clear();
+            nodeMeshes = {};
+            linkLines = [];
+
+            graphNodes.forEach(node => {
+                const geometry = new THREE.IcosahedronGeometry(5, 1);
+                const colorKey = node.id.toUpperCase().replace(/\s/g, '').replace('/', '');
+                const material = new THREE.MeshStandardMaterial({ color: PILLAR_COLORS[colorKey] || NODE_DEFAULT_COLOR, roughness: 0.3, metalness: 0.8 });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.userData = node;
+                nodeMeshes[node.id] = mesh;
+                dataGroup.add(mesh);
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'node-label';
+                labelDiv.textContent = node.id;
+                const cssLabel = new CSS2DObject(labelDiv);
+                cssLabel.position.set(0, 7, 0);
+                mesh.add(cssLabel);
+            });
+
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5 });
+            graphLinks.forEach(link => {
+                const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+                const line = new THREE.Line(geometry, lineMaterial);
+                linkLines.push({ line, sourceId: link.source, targetId: link.target });
+                dataGroup.add(line);
+            });
+        }
+
+        function setupForceSimulation() {
+            forceSimulation = d3.forceSimulation(graphNodes, 3)
+                .force('link', d3.forceLink(graphLinks).id(d => d.id).distance(40).strength(0.5))
+                .force('charge', d3.forceManyBody().strength(-200))
+                .force('center', d3.forceCenter(0, 0, 0).strength(0.1));
+
+            if (centralPointCloud) {
+                forceSimulation.force('geometry', createGeometryForce());
+            }
+
+            forceSimulation.alpha(1).restart();
+        }
+        
+        function createGeometryForce() {
+            const strength = 100;
+            const radius = 100 * 100;
+            
+            const vertices = centralPointCloud.geometry.attributes.position.array;
+            const sampleSize = Math.min(200, vertices.length / 3);
+            const sampledPoints = [];
+            
+            function sample() {
+                sampledPoints.length = 0;
+                for (let i = 0; i < sampleSize; i++) {
+                    const randomIndex = Math.floor(Math.random() * (vertices.length / 3)) * 3;
+                    sampledPoints.push(new THREE.Vector3(vertices[randomIndex], vertices[randomIndex + 1], vertices[randomIndex + 2]));
+                }
+            }
+            sample();
+
+            function force(alpha) {
+                if (Math.random() < 0.1) sample();
+
+                for (const node of graphNodes) {
+                    for (const point of sampledPoints) {
+                        const dx = node.x - point.x;
+                        const dy = node.y - point.y;
+                        const dz = node.z - point.z;
+                        const d2 = dx * dx + dy * dy + dz * dz;
+
+                        if (d2 < radius) {
+                            const d = Math.sqrt(d2);
+                            if (d > 1e-6) {
+                                const k = strength * alpha / d;
+                                node.vx += dx * k;
+                                node.vy += dy * k;
+                                node.vz += dz * k;
+                            }
+                        }
+                    }
+                }
+            }
+            return force;
+        }
+
+
+        function updateCentralGeometry(vertices) {
+            clearCentralGeometry();
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.center();
+
+            const material = new THREE.PointsMaterial({
+                color: 0x00A9FF,
+                size: 1.5,
+                transparent: true,
+                opacity: 0.7,
+                blending: THREE.AdditiveBlending
+            });
+            
+            centralPointCloud = new THREE.Points(geometry, material);
+            scene.add(centralPointCloud);
+
+            if (forceSimulation) {
+                forceSimulation.force('geometry', createGeometryForce());
+                forceSimulation.alpha(1).restart();
+            }
+        }
+
+        function clearCentralGeometry() {
+            if (centralPointCloud) {
+                scene.remove(centralPointCloud);
+                centralPointCloud.geometry.dispose();
+                centralPointCloud.material.dispose();
+                centralPointCloud = null;
+            }
+            if (forceSimulation) {
+                forceSimulation.force('geometry', null);
+                forceSimulation.alpha(1).restart();
+            }
+        }
+        
+        function extractNumericValues(data) {
+            const numbers = [];
+            function traverse(obj) {
+                for (const key in obj) {
+                    if (typeof obj[key] === 'number') {
+                        numbers.push(obj[key]);
+                    } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+                        traverse(obj[key]);
+                    }
+                }
+            }
+            if (data) traverse(data);
+            return numbers;
+        }
+
+
+        function onClick(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(dataGroup.children.filter(c => c.type === 'Mesh'));
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                
+                if(focusedNode && focusedNode !== clickedObject) focusedNode.material.emissive.setHex(0x000000);
+                focusedNode = clickedObject;
+                focusedNode.material.emissive.setHex(0x888800);
+
+                window.parent.postMessage({ type: 'CRUCIBLE_NODE_CLICKED', payload: { id: clickedObject.userData.id } }, '*');
+            } else {
+                 if(focusedNode) focusedNode.material.emissive.setHex(0x000000);
+                 focusedNode = null;
+                 window.parent.postMessage({ type: 'CRUCIBLE_NODE_CLICKED', payload: { id: null } }, '*');
+            }
+        }
+
+        function setupMessageListener() {
+            window.addEventListener('message', (event) => {
+                const { type, payload, width, height } = event.data;
+                
+                switch(type) {
+                    case 'resize': {
+                        if (width > 0 && height > 0 && camera && renderer && labelRenderer) {
+                            console.log(`[Crucible] Resizing to ${width}x${height}`);
+                            renderer.setSize(width, height);
+                            labelRenderer.setSize(width, height);
+                            camera.aspect = width / height;
+                            camera.updateProjectionMatrix();
+                        }
+                        break;
+                    }
+                    case 'INIT_DATA':
+                        if (payload.relationshipMatrix) {
+                            setupGraphFromMatrix(payload.relationshipMatrix);
+                            window.parent.postMessage({ type: 'CRUCIBLE_READY' }, '*');
+                        }
+                        break;
+                    case 'UPDATE_GEOMETRY':
+                        if (payload.vertices) {
+                            updateCentralGeometry(payload.vertices);
+                        }
+                        break;
+                    case 'CLEAR_GEOMETRY':
+                        clearCentralGeometry();
+                        break;
+                    case 'UPDATE_MODULATOR_DATA':
+                        modulatorData = payload.data;
+                        break;
+                    case 'CLEAR_MODULATOR_DATA':
+                        modulatorData = null;
+                        break;
+                    case 'FOCUS_NODE':
+                        const nodeToFocusId = payload.conceptId;
+                        
+                        // Clear previous focus
+                        if(focusedNode && (!nodeToFocusId || focusedNode.userData.id !== nodeToFocusId)) {
+                           focusedNode.material.emissive.setHex(0x000000);
+                           focusedNode = null;
+                        }
+                        
+                        // Set new focus
+                        if (nodeToFocusId) {
+                            const nodeToFocus = nodeMeshes[nodeToFocusId];
+                            if (nodeToFocus) {
+                                nodeToFocus.material.emissive.setHex(0x888800); // Yellowish glow
+                                focusedNode = nodeToFocus;
+                            }
+                        }
+                        break;
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+
+            if (stars) stars.rotation.y += 0.0001;
+            
+            if (centralPointCloud) {
+                centralPointCloud.rotation.y += 0.0005;
+                centralPointCloud.rotation.x += 0.0002;
+            }
+
+            const p1Angle = time * 0.5;
+            pointLight1.position.set(Math.cos(p1Angle) * 150, Math.sin(p1Angle * 0.7) * 50, Math.sin(p1Angle) * 150);
+            
+            const p2Angle = time * 0.3;
+            pointLight2.position.set(Math.cos(p2Angle) * -150, Math.sin(p2Angle * 0.9) * 50, Math.sin(p2Angle) * -150);
+
+            if (forceSimulation) {
+                forceSimulation.tick();
+
+                graphNodes.forEach(node => {
+                    const mesh = nodeMeshes[node.id];
+                    if (mesh) {
+                        let scaleMod = 1;
+                        let levitation = 0;
+                        
+                        if (modulatorData) {
+                            const numericValues = extractNumericValues(modulatorData);
+                            if (numericValues.length > 0) {
+                                scaleMod = THREE.MathUtils.clamp(numericValues[0] * 0.1, 0.2, 5.0);
+                                if (numericValues.length > 1) {
+                                    const colorKey = node.id.toUpperCase().replace(/\s/g, '').replace('/', '');
+                                    const baseColor = basePillarColors[colorKey] || NODE_DEFAULT_COLOR;
+                                    const hueShift = (numericValues[1] % 100) / 100 * 0.1;
+                                    mesh.material.color.setHSL(baseColor.getHSL({h:0,s:0,l:0}).h + hueShift, 1, 0.5);
+                                }
+                                if (numericValues.length > 2) {
+                                    levitation = (numericValues[2] % 50) - 25;
+                                }
+                            }
+                        } else {
+                            const colorKey = node.id.toUpperCase().replace(/\s/g, '').replace('/', '');
+                            const baseColor = basePillarColors[colorKey] || NODE_DEFAULT_COLOR;
+                            mesh.material.color.copy(baseColor);
+                        }
+                        
+                        const pulse = 1.0 + Math.sin(time * 2 + node.index * 0.5) * 0.05;
+                        mesh.scale.setScalar(pulse * scaleMod);
+                        mesh.position.set(node.x, node.y + levitation, node.z);
+                    }
+                });
+
+                linkLines.forEach(link => {
+                    const sourceNode = graphNodes.find(n => n.id === link.sourceId);
+                    const targetNode = graphNodes.find(n => n.id === link.targetId);
+                    if (sourceNode && targetNode) {
+                        const positions = link.line.geometry.attributes.position;
+                        const sourcePos = nodeMeshes[sourceNode.id].position;
+                        const targetPos = nodeMeshes[targetNode.id].position;
+                        positions.setXYZ(0, sourcePos.x, sourcePos.y, sourcePos.z);
+                        positions.setXYZ(1, targetPos.x, targetPos.y, targetPos.z);
+                        positions.needsUpdate = true;
+                    }
+                });
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        init();
+        setupMessageListener();
+        animate();
+    </script>
+</body>
+</html>

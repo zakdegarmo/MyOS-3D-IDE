@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyOS 3D IDE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'brand-primary': '#00A9FF',
+              'brand-secondary': '#A0E9FF',
+              'brand-dark': '#0087CC',
+              'base-100': '#CDF5FD',
+              'base-200': '#A0E9FF',
+              'base-300': '#89CFF3',
+              'bg-dark': '#0C1117',
+              'bg-light': '#1D232A',
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.3s ease-out forwards',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: 0 },
+                '100%': { opacity: 1 },
+              },
+            },
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.1/",
+    "react": "https://esm.sh/react@^19.1.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.3?external=three,react",
+    "three/": "https://esm.sh/three@^0.179.1/",
+    "three": "https://esm.sh/three@^0.179.1",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.3.0?external=three,react",
+    "opentype.js": "https://esm.sh/opentype.js@^1.3.4",
+    "three-stdlib": "https://esm.sh/three-stdlib@^2.36.0",
+    "simplex-noise": "https://esm.sh/simplex-noise@^4.0.1",
+    "react-resizable-panels": "https://esm.sh/react-resizable-panels@^2.0.20?external=react",
+    "acorn": "https://cdn.jsdelivr.net/npm/acorn/dist/acorn.mjs",
+    "estree": "https://cdn.jsdelivr.net/npm/estree/index.mjs"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
