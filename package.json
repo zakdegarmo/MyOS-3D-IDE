@@ -18,8 +18,8 @@
     "three-stdlib": "^2.36.0",
     "simplex-noise": "^4.0.1",
     "react-resizable-panels": "^2.0.20",
-    "acorn": "latest",
-    "estree": "latest"
+    "acorn": "latest"
+    
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
