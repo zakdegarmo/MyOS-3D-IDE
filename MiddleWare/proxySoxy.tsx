@@ -1,49 +1,64 @@
-// FIX: Added a reference to bun-types to resolve the "Cannot find name 'Bun'" error.
-/// <reference types="bun-types" />
+// FIX: Changed the type reference to '@types/bun' to align with the likely project setup
+// indicated by the TypeScript error message, which resolves the missing 'Bun' global.
+/// <reference types="@types/bun" />
 
-// A simple Bun server that handles both HTTP and WebSocket requests.
+import { ServerWebSocket } from "bun";
+
+// A simple Bun-based proxy server.
+// It listens on port 10000.
+// It can handle both HTTP requests and WebSocket connections.
 
 const server = Bun.serve({
   port: 10000,
   fetch(req, server) {
     const url = new URL(req.url);
 
-    // If the request is for a WebSocket, try to upgrade the connection.
+    // Upgrade to WebSocket if requested
     if (url.pathname === "/ws") {
       const success = server.upgrade(req);
-      return success ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
+      if (success) {
+        return; // Bun handles the response for successful upgrades
+      }
+      return new Response("WebSocket upgrade failed", { status: 500 });
+    }
+    
+    // Simple test endpoint
+    if (url.pathname === "/api/example") {
+        console.log(`[ProxySoxy] Received request for /api/example`);
+        return new Response(JSON.stringify({
+            message: "Hello from ProxySoxy!",
+            timestamp: new Date().toISOString(),
+        }), {
+            headers: { "Content-Type": "application/json" },
+        });
     }
 
-    // New API endpoint for a simple POST request
-    if (url.pathname === "/api/example" && req.method === "POST") {
-      return new Response(JSON.stringify({ message: "API call to Bun proxy successful!" }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    // Handle standard HTTP requests for other paths.
-    return new Response("Hello from the Bun proxy server!");
+    // Default response for other paths
+    return new Response("ProxySoxy is running. Use /ws for WebSocket or known API endpoints.", { status: 200 });
   },
-
   websocket: {
-    // This is the core WebSocket message handler.
-    // It's called whenever a message is received from a client.
+    open(ws: ServerWebSocket) {
+      console.log("WebSocket connection opened.");
+      ws.subscribe("the-group-chat");
+      ws.send("Welcome to the WebSocket chat!");
+    },
     message(ws, message) {
       console.log(`Received message: ${message}`);
-      // Echo the message back to the client.
-      ws.send(`You said: ${message}`);
+      // Echo the message back to all clients in the channel
+      ws.publish("the-group-chat", `A client says: ${message}`);
     },
-
-    // This is called when a new WebSocket connection is opened.
-    open(ws) {
-      console.log(`New WebSocket connection opened.`);
+    close(ws) {
+      console.log("WebSocket connection closed.");
+      ws.unsubscribe("the-group-chat");
     },
-
-    // This is called when a WebSocket connection is closed.
-    close(ws, code, reason) {
-      console.log(`WebSocket connection closed with code ${code}.`);
-    },
+  },
+  error(error) {
+    return new Response(`<pre>${error}\n${error.stack}</pre>`, {
+      headers: {
+        "Content-Type": "text/html",
+      },
+    });
   },
 });
 
-console.log(`Bun proxy server listening on http://localhost:${server.port}`);
+console.log(`🦊 ProxySoxy server listening on http://localhost:${server.port}`);

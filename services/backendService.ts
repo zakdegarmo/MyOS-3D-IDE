@@ -131,64 +131,41 @@ class BackendService {
     }
 
     /**
-     * Makes a proxied request via the backend to another server.
-     * @param targetUrl The full URL of the target server endpoint.
-     * @param payload The JSON payload to send.
-     * @param onData A callback for streaming data back from the proxy.
+     * Sends a request to the main backend, which will then proxy it to the targetUrl.
+     * This is for backend-to-backend communication.
      */
-    public async proxyCall(targetUrl: string, payload: any, onData: (data: { type: string; payload: any }) => void): Promise<void> {
+    public async proxyCall(targetUrl: string, method: string = 'GET', payload?: any): Promise<any> {
         try {
-            const response = await fetch(`${BASE_URL}/proxy-call`, {
-                method: 'POST',
+            const response = await fetch(`${BASE_URL}/proxy`, {
+                method: 'POST', // The proxy endpoint itself is always POST
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ targetUrl, payload }),
+                body: JSON.stringify({ targetUrl, method, payload }),
             });
 
-             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Proxy server responded with ${response.status}: ${errorText}`);
+            const contentType = response.headers.get("content-type");
+            let responseData;
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                responseData = await response.json();
+            } else {
+                responseData = await response.text();
             }
-            
-            if (!response.body) {
-                throw new Error("Response body is missing.");
-            }
-            
-            // Handle streaming response from the proxy
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                
-                // Assuming NDJSON stream from proxy for consistency
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+            if (!response.ok) {
+                const errorMessage = typeof responseData === 'object' ? responseData.message : responseData;
+                throw new Error(errorMessage || `Proxy call failed with status ${response.status}`);
+            }
 
-                for (const line of lines) {
-                    if (line.trim() === '') continue;
-                    try {
-                        onData(JSON.parse(line));
-                    } catch (e) {
-                        // If it's not JSON, just send the raw line
-                        onData({ type: 'out', payload: line });
-                    }
-                }
-            }
-            if (buffer.trim()) {
-                onData({ type: 'out', payload: buffer });
-            }
+            return responseData;
 
         } catch (error: any) {
-            console.error('[BackendService] Proxy call error:', error);
-            const errorMessage = error.message.includes('Failed to fetch')
+            console.error('[BackendService] Proxy Call error:', error);
+             const errorMessage = error.message.includes('Failed to fetch')
               ? 'Proxy call failed. Could not connect to the backend server.'
               : error.message;
             throw new Error(errorMessage);
         }
     }
+
 
     // --- Workspace and Project Management ---
 

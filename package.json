@@ -19,7 +19,8 @@
     "simplex-noise": "^4.0.1",
     "react-resizable-panels": "^2.0.20",
     "acorn": "latest",
-    "estree": "latest"
+    "estree": "latest",
+    "bun": "^1.2.21"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
