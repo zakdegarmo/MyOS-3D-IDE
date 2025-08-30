@@ -8,6 +8,8 @@ const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const { GoogleGenAI } = require("@google/genai");
 const { knowledgeBase } = require('./knowledgeBase');
+const fetch = require('node-fetch');
+
 
 const app = express();
 const PORT = 3001;
@@ -42,7 +44,7 @@ const SIMILARITY_THRESHOLD = 0.7;
 const TOP_K_RESULTS = 3;
 
 function cosineSimilarity(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    if (!vecA || !vecB || vecA.length !== vecA.length) return 0;
     let dotProduct = 0.0;
     let normA = 0.0;
     let normB = 0.0;
@@ -89,6 +91,10 @@ const ensureDir = async (dir) => {
         console.error(`[MyOS Server] Could not create directory: ${dir}`, error);
         process.exit(1);
     }
+};
+
+const streamData = (res, type, payload) => {
+    res.write(JSON.stringify({ type, payload }) + '\n');
 };
 
 console.log('[MyOS Server] Initializing a clean, functional backend...');
@@ -276,16 +282,12 @@ app.post('/api/execute-bun', (req, res) => {
     const bunProcess = spawn(bunCmd, args, { cwd: workspacePath });
     console.log(`[Bun Command] In [${projectId}]: Executing: ${command}`);
 
-    const streamData = (type, data) => {
-        res.write(JSON.stringify({ type, payload: data.toString() }) + '\n');
-    };
-
-    bunProcess.stdout.on('data', (data) => streamData('stdout', data));
-    bunProcess.stderr.on('data', (data) => streamData('stderr', data));
+    bunProcess.stdout.on('data', (data) => streamData(res, 'stdout', data.toString()));
+    bunProcess.stderr.on('data', (data) => streamData(res, 'stderr', data.toString()));
 
     bunProcess.on('close', (code) => {
         console.log(`[Bun Command] Process for [${projectId}] exited with code ${code}`);
-        streamData('exit', `Process finished with code ${code}.`);
+        streamData(res, 'exit', `Process finished with code ${code}.`);
         res.end();
     });
 
@@ -294,10 +296,62 @@ app.post('/api/execute-bun', (req, res) => {
         if (!res.headersSent) {
             res.status(500).send('Failed to start the bun process.');
         } else {
-            streamData('stderr', `Failed to start subprocess: ${err.message}`);
+            streamData(res, 'stderr', `Failed to start subprocess: ${err.message}`);
             res.end();
         }
     });
+});
+
+/**
+ * POST /api/proxy-call
+ * Makes a request from this server to another server on behalf of the client.
+ */
+app.post('/api/proxy-call', async (req, res) => {
+    const { targetUrl, payload } = req.body;
+
+    if (!targetUrl || typeof targetUrl !== 'string') {
+        return res.status(400).json({ status: 'error', message: 'Invalid or missing targetUrl.' });
+    }
+
+    try {
+        console.log(`[Proxy] Making request to: ${targetUrl}`);
+        const proxyRes = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+        });
+
+        res.setHeader('Content-Type', 'application/x-ndjson');
+        res.setHeader('Transfer-Encoding', 'chunked');
+
+        streamData(res, 'system', `Proxy response status: ${proxyRes.status}`);
+
+        // Stream the response body back to the original client
+        const reader = proxyRes.body;
+        reader.on('data', (chunk) => {
+            streamData(res, 'out', chunk.toString());
+        });
+
+        reader.on('end', () => {
+             streamData(res, 'system', 'Proxy stream finished.');
+             res.end();
+        });
+
+        reader.on('error', (err) => {
+            console.error('[Proxy] Error reading from target stream:', err);
+            streamData(res, 'error', `Error reading from target stream: ${err.message}`);
+            res.end();
+        });
+
+    } catch (error) {
+        console.error('[Proxy] Error making proxy call:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ status: 'error', message: `Failed to make proxy call: ${error.message}` });
+        } else {
+            streamData(res, 'error', `Failed to make proxy call: ${error.message}`);
+            res.end();
+        }
+    }
 });
 
 

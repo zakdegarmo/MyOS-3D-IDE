@@ -80,13 +80,15 @@ interface ToolbarProps {
   onExportOntology: () => void;
   onCreatePrimitive: () => void;
   onIntegrateWebsite: () => void;
+  isProcessing: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = (props) => {
   const { 
     onImportModel, onLoadFont, onCreateFromGlyph, isFontLoaded, onSaveScene, 
     onNewProject, onSaveProject, onImportProject, onExportProject,
-    onImportOntology, onExportOntology, onCreatePrimitive, onIntegrateWebsite
+    onImportOntology, onExportOntology, onCreatePrimitive, onIntegrateWebsite,
+    isProcessing
   } = props;
   const modelFileInputRef = useRef<HTMLInputElement>(null);
   const fontFileInputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +128,7 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
           <MenuItem onClick={() => modelFileInputRef.current?.click()}>Import Model (.glb)...</MenuItem>
           <MenuItem onClick={() => fontFileInputRef.current?.click()}>Load Font (.ttf, .otf)...</MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={onSaveProject}>Save Project</MenuItem>
+          <MenuItem onClick={onSaveProject} disabled={isProcessing}>Save Project</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={onImportProject}>Import Project (.zip)...</MenuItem>
           <MenuItem onClick={onExportProject}>Export Project (.zip)...</MenuItem>

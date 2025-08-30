@@ -130,6 +130,66 @@ class BackendService {
         }
     }
 
+    /**
+     * Makes a proxied request via the backend to another server.
+     * @param targetUrl The full URL of the target server endpoint.
+     * @param payload The JSON payload to send.
+     * @param onData A callback for streaming data back from the proxy.
+     */
+    public async proxyCall(targetUrl: string, payload: any, onData: (data: { type: string; payload: any }) => void): Promise<void> {
+        try {
+            const response = await fetch(`${BASE_URL}/proxy-call`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targetUrl, payload }),
+            });
+
+             if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Proxy server responded with ${response.status}: ${errorText}`);
+            }
+            
+            if (!response.body) {
+                throw new Error("Response body is missing.");
+            }
+            
+            // Handle streaming response from the proxy
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                
+                // Assuming NDJSON stream from proxy for consistency
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    try {
+                        onData(JSON.parse(line));
+                    } catch (e) {
+                        // If it's not JSON, just send the raw line
+                        onData({ type: 'out', payload: line });
+                    }
+                }
+            }
+            if (buffer.trim()) {
+                onData({ type: 'out', payload: buffer });
+            }
+
+        } catch (error: any) {
+            console.error('[BackendService] Proxy call error:', error);
+            const errorMessage = error.message.includes('Failed to fetch')
+              ? 'Proxy call failed. Could not connect to the backend server.'
+              : error.message;
+            throw new Error(errorMessage);
+        }
+    }
+
     // --- Workspace and Project Management ---
 
     public async createNewWorkspace(): Promise<{ projectId: string }> {
