@@ -81,14 +81,15 @@ const INITIAL_RELATIONSHIP_MATRIX: Record<string, Record<string, string>> = {
     'Resonance':'Harmonizes With', 'Transcendence': 'Aspires To', 'Nothing/Everything':'is'
   }
 };
-
 const INTEGRATIONS: Integration[] = [
     { title: "0-Nexus", url: "https://0-nexus.vercel.app/" },
-    { title: "3D TTF", url: "https://3d-ttf.vercel.app/" },
+    { title: "3D Font Explorer", url: "https://3d-ttf.vercel.app/" },
     { title: "Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
-    { title: "Hyper Aether Pilgrim", url: "https://hyper-aether-pilgrim.vercel.app/" },
-    { title: "3D File Explorer", url: "https://3-d-file-explorer.vercel.app//" },
-    { title: "AtomVis", url: "https://atom-vis.vercel.app/" },
+    { title: "Hyper Aether Pilgrim", url: "https://hyper-aether-pilgrim-git-dev-zachary-degarmos-projects.vercel.app/" },
+    { title: "3D File Explorer", url: "https://3-d-file-explorer-git-main-zachary-degarmos-projects.vercel.app/" },
+    { title: "Atom-Visualizer", url: "https://atom-vis.vercel.app/" },
+    { title: "MyOS Nexus Page Editor", url: "https://nexus-page-editor.vercel.app/" },
+    { title: "MyOS IDE", url: "https://my-os-3-d-ide.vercel.app/" },
     { title: "Zak's Notepad", url: "https://zakdegarmo.github.io/ZaksNotepad/index.html" },
     { title: "MyOntology Docs", url: "https://zakdegarmo.github.io/MyOntology/" }
 ];
