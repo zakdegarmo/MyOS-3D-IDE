@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 
 // Reusable DropdownMenu component
@@ -76,19 +74,19 @@ interface ToolbarProps {
   onSaveScene: () => void;
   onNewProject: () => void;
   onSaveProject: () => void;
-  onLoadProjectFromServer: () => void;
   onImportProject: () => void;
   onExportProject: () => void;
   onImportOntology: () => void;
   onExportOntology: () => void;
   onCreatePrimitive: () => void;
+  onIntegrateWebsite: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = (props) => {
   const { 
     onImportModel, onLoadFont, onCreateFromGlyph, isFontLoaded, onSaveScene, 
-    onNewProject, onSaveProject, onLoadProjectFromServer, onImportProject, onExportProject,
-    onImportOntology, onExportOntology, onCreatePrimitive
+    onNewProject, onSaveProject, onImportProject, onExportProject,
+    onImportOntology, onExportOntology, onCreatePrimitive, onIntegrateWebsite
   } = props;
   const modelFileInputRef = useRef<HTMLInputElement>(null);
   const fontFileInputRef = useRef<HTMLInputElement>(null);
@@ -128,13 +126,12 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
           <MenuItem onClick={() => modelFileInputRef.current?.click()}>Import Model (.glb)...</MenuItem>
           <MenuItem onClick={() => fontFileInputRef.current?.click()}>Load Font (.ttf, .otf)...</MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={onSaveProject}>Save Project to Server</MenuItem>
-          <MenuItem onClick={onLoadProjectFromServer}>Load Project from Server...</MenuItem>
+          <MenuItem onClick={onSaveProject}>Save Project</MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={onImportProject}>Import Project from File (.json)...</MenuItem>
-          <MenuItem onClick={onExportProject}>Export Project to File (.json)...</MenuItem>
-          <MenuItem onClick={onImportOntology}>Import Ontology from File (.glb)...</MenuItem>
-          <MenuItem onClick={onExportOntology}>Export Ontology to File (.glb)...</MenuItem>
+          <MenuItem onClick={onImportProject}>Import Project (.zip)...</MenuItem>
+          <MenuItem onClick={onExportProject}>Export Project (.zip)...</MenuItem>
+          <MenuItem onClick={onImportOntology}>Import Ontology (.glb)...</MenuItem>
+          <MenuItem onClick={onExportOntology}>Export Ontology (.glb)...</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={onSaveScene}>Save Scene As (.glb)...</MenuItem>
           <MenuSeparator />
@@ -154,7 +151,7 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
         </DropdownMenu>
         
         <DropdownMenu label="Integrations">
-          <MenuItem onClick={() => console.log('Manage Integrations clicked')} disabled>Manage Integrations...</MenuItem>
+          <MenuItem onClick={onIntegrateWebsite}>Integrate New Website...</MenuItem>
           <MenuSeparator />
           <p className="px-3 py-1 text-xs text-gray-500 font-semibold uppercase">Installed</p>
           <MenuItem disabled>three.js</MenuItem>

@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
@@ -18,6 +14,7 @@ import { OntologyMatrixPanel } from './panels/OntologyMatrixPanel';
 import { LoadingIcon } from './components/icons';
 import { GlyphSelectorModal } from './components/GlyphSelectorModal';
 import { FunctionEditorModal } from './components/FunctionEditorModal';
+import { IntegrateWebsiteModal } from './components/IntegrateWebsiteModal';
 import { TransformState, ModifiersState, Relationship, LoadedModel, GlyphObject, ObjectGeometrySettings, ExtrudeSettings, PrimitiveObject, PrimitiveType, OntologicalParameter, ConsoleLog, EditingRelation, ProjectState, SerializableLoadedModel, Oscillator, OntologicalSchema, Integration } from './types';
 import { Toolbar } from './components/Toolbar';
 import { createSystem, Concept } from './system/systemFactory';
@@ -82,7 +79,7 @@ const INITIAL_RELATIONSHIP_MATRIX: Record<string, Record<string, string>> = {
     'Resonance':'Harmonizes With', 'Transcendence': 'Aspires To', 'Nothing/Everything':'is'
   }
 };
-const INTEGRATIONS: Integration[] = [
+const INITIAL_INTEGRATIONS: Integration[] = [
     { title: "MyOS 3D 0=1 Nexus", url: "https://0-nexus.vercel.app/" },
     { title: "MyOS 3D Font Explorer", url: "https://3d-ttf.vercel.app/" },
     { title: "MyOS 3D Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
@@ -131,7 +128,9 @@ export const App: React.FC = () => {
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [isGlyphSelectorOpen, setIsGlyphSelectorOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [activeIntegrationUrl, setActiveIntegrationUrl] = useState<string>(INTEGRATIONS[0]?.url || '');
+  const [isIntegrateModalOpen, setIsIntegrateModalOpen] = useState(false);
+  const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
+  const [activeIntegrationUrl, setActiveIntegrationUrl] = useState<string>(INITIAL_INTEGRATIONS[0]?.url || '');
 
   // Ontological System State
   const [myos, setMyos] = useState<Record<string, Concept>>({});
@@ -183,6 +182,10 @@ export const App: React.FC = () => {
   }, []);
   const updateObjectOscillators = useCallback((updater: React.SetStateAction<Record<string, Oscillator[]>>) => {
       setObjectOscillators(updater);
+      setIsDirty(true);
+  }, []);
+  const updateIntegrations = useCallback((updater: React.SetStateAction<Integration[]>) => {
+      setIntegrations(updater);
       setIsDirty(true);
   }, []);
 
@@ -344,10 +347,38 @@ export const App: React.FC = () => {
       });
   }, [logToIDE, updateObjectOscillators, glyphObjects, loadedModels, primitiveObjects]);
 
+  const handleBunCommand = useCallback((command: string) => {
+    if (!currentProjectId) {
+        logToIDE('No active project. Cannot execute bun command.', 'error');
+        return;
+    }
+    logToIDE(`Executing in [${currentProjectId}]: ${command}`, 'system');
+    backendService.executeBunCommand(command, currentProjectId, (data) => {
+        let type: ConsoleLog['type'] = 'out';
+        if (data.type === 'stderr') type = 'error';
+        if (data.type === 'exit') type = 'system';
+        logToIDE(data.payload, type);
+    }).catch(err => {
+        const message = err instanceof Error ? err.message : String(err);
+        logToIDE(`Bun Command Error: ${message}`, 'error');
+    });
+  }, [logToIDE, currentProjectId]);
+  
   const handleCommand = useCallback((command: string) => {
     logToIDE(command, 'in');
-    const [cmd] = command.toLowerCase().split(/\s+/);
+    const [cmd, ...args] = command.toLowerCase().split(/\s+/);
 
+    // --- Bun package manager commands ---
+    if (cmd === 'bun') {
+        return handleBunCommand(command);
+    }
+    
+    // --- Project management commands ---
+    if (cmd === 'download' && args[0] === 'project') {
+        handleExportProject();
+        return;
+    }
+    
     // --- Client-side commands ---
     if (cmd === 'oscillate' || cmd === 'stop') {
         if (selectedObjectKeys.length !== 1) {
@@ -406,7 +437,7 @@ export const App: React.FC = () => {
         const message = err instanceof Error ? err.message : String(err);
         logToIDE(`AI Query Error: ${message}`, 'error');
     });
-  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand]);
+  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand, handleBunCommand]);
 
 
   const handleDeleteObject = useCallback((keyToDelete: string) => {
@@ -592,10 +623,22 @@ export const App: React.FC = () => {
     });
   }, [logToIDE]);
 
+  const handleAddIntegration = useCallback(({ title, url }: Integration) => {
+    const newIntegration = { title, url };
+    updateIntegrations(prev => {
+        if (prev.some(i => i.url === url)) {
+            logToIDE(`Integration with URL ${url} already exists.`, 'info');
+            return prev;
+        }
+        return [...prev, newIntegration];
+    });
+    setActiveIntegrationUrl(url);
+    setIsIntegrateModalOpen(false);
+    logToIDE(`Added new integration: ${title}`, 'success');
+  }, [updateIntegrations, logToIDE]);
 
   // --- PROJECT LIFECYCLE ---
   const getProjectState = useCallback((): ProjectState => {
-    // Convert loadedModels to serializable format
     const serializableModels: SerializableLoadedModel[] = loadedModels.map(model => ({
       id: model.id,
       filename: model.filename,
@@ -604,153 +647,151 @@ export const App: React.FC = () => {
     }));
     
     return {
-      glyphObjects,
-      loadedModels: serializableModels,
-      primitiveObjects,
-      objectTransforms,
-      objectModifiers,
-      objectSettings,
-      objectParameters,
-      objectOscillators,
-      ontologicalParameters,
-      relationships,
-      customScripts,
-      ontologicalMatrix,
+      glyphObjects, loadedModels: serializableModels, primitiveObjects,
+      objectTransforms, objectModifiers, objectSettings, objectParameters,
+      objectOscillators, ontologicalParameters, relationships, customScripts,
+      ontologicalMatrix, integrations,
     };
   }, [
       glyphObjects, loadedModels, primitiveObjects, objectTransforms, objectModifiers,
       objectSettings, objectParameters, objectOscillators, ontologicalParameters,
-      relationships, customScripts, ontologicalMatrix
+      relationships, customScripts, ontologicalMatrix, integrations
   ]);
   
   const loadProjectState = useCallback((state: ProjectState) => {
     setIsProcessing(true);
-    logToIDE('Loading project...', 'info');
-    try {
-        setGlyphObjects(state.glyphObjects || []);
-        setPrimitiveObjects(state.primitiveObjects || []);
-        setObjectTransforms(state.objectTransforms || {});
-        setObjectModifiers(state.objectModifiers || {});
-        setObjectSettings(state.objectSettings || {});
-        setObjectParameters(state.objectParameters || {});
-        setObjectOscillators(state.objectOscillators || {});
-        setOntologicalParameters(state.ontologicalParameters || {});
-        setRelationships(state.relationships || []);
-        setCustomScripts(state.customScripts || {});
-        setOntologicalMatrix(state.ontologicalMatrix || INITIAL_RELATIONSHIP_MATRIX);
-        setSelectedObjectKeys([]);
+    logToIDE('Loading project state...', 'info');
+    return new Promise<void>((resolve, reject) => {
+        try {
+            setGlyphObjects(state.glyphObjects || []);
+            setPrimitiveObjects(state.primitiveObjects || []);
+            setObjectTransforms(state.objectTransforms || {});
+            setObjectModifiers(state.objectModifiers || {});
+            setObjectSettings(state.objectSettings || {});
+            setObjectParameters(state.objectParameters || {});
+            setObjectOscillators(state.objectOscillators || {});
+            setOntologicalParameters(state.ontologicalParameters || {});
+            setRelationships(state.relationships || []);
+            setCustomScripts(state.customScripts || {});
+            setOntologicalMatrix(state.ontologicalMatrix || INITIAL_RELATIONSHIP_MATRIX);
+            const loadedIntegrations = state.integrations && state.integrations.length > 0 ? state.integrations : INITIAL_INTEGRATIONS;
+            setIntegrations(loadedIntegrations);
+            setActiveIntegrationUrl(loadedIntegrations[0]?.url || '');
+            setSelectedObjectKeys([]);
 
-        // Rehydrate loaded models
-        const rehydratedModels: LoadedModel[] = [];
-        const loader = new GLTFLoader();
-        const promises = (state.loadedModels || []).map(serialModel => {
-            return new Promise<void>((resolve, reject) => {
-                const buffer = base64ToArrayBuffer(serialModel.originalBuffer);
-                loader.parse(
-                    buffer.slice(0),
-                    '',
-                    (gltf) => {
-                        rehydratedModels.push({
-                            id: serialModel.id,
-                            filename: serialModel.filename,
-                            identity: serialModel.identity,
-                            scene: gltf.scene,
-                            gltfJson: gltf.parser.json,
-                            originalBuffer: buffer,
-                        });
-                        resolve();
-                    },
-                    (error) => {
-                        logToIDE(`Failed to parse model ${serialModel.filename}: ${error.message}`, 'error');
-                        reject(error);
-                    }
-                );
+            const rehydratedModels: LoadedModel[] = [];
+            const loader = new GLTFLoader();
+            const promises = (state.loadedModels || []).map(serialModel => {
+                return new Promise<void>((resolveModel, rejectModel) => {
+                    const buffer = base64ToArrayBuffer(serialModel.originalBuffer);
+                    loader.parse(
+                        buffer.slice(0), '',
+                        (gltf) => {
+                            rehydratedModels.push({
+                                id: serialModel.id, filename: serialModel.filename, identity: serialModel.identity,
+                                scene: gltf.scene, gltfJson: gltf.parser.json, originalBuffer: buffer,
+                            });
+                            resolveModel();
+                        },
+                        (error) => {
+                            logToIDE(`Failed to parse model ${serialModel.filename}: ${error.message}`, 'error');
+                            rejectModel(error);
+                        }
+                    );
+                });
             });
-        });
 
-        Promise.all(promises).then(() => {
-            setLoadedModels(rehydratedModels);
-            logToIDE('Project loaded successfully.', 'success');
-            setIsDirty(false); // Project is clean after load
-            setIsProcessing(false);
-        }).catch(err => {
-            logToIDE(`Error rehydrating models: ${err.message}`, 'error');
-            setIsProcessing(false);
-        });
+            Promise.all(promises).then(() => {
+                setLoadedModels(rehydratedModels);
+                logToIDE('Project state loaded successfully.', 'success');
+                setIsDirty(false);
+                setIsProcessing(false);
+                resolve();
+            }).catch(err => {
+                logToIDE(`Error rehydrating models: ${err.message}`, 'error');
+                setIsProcessing(false);
+                reject(err);
+            });
 
-    } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Failed to load project state: ${message}`, 'error');
-        setIsProcessing(false);
-    }
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logToIDE(`Failed to load project state: ${message}`, 'error');
+            setIsProcessing(false);
+            reject(e);
+        }
+    });
   }, [logToIDE]);
 
-  const handleNewProject = useCallback(() => {
+  const handleNewProject = useCallback(async () => {
     if (isDirty && !window.confirm("You have unsaved changes. Are you sure you want to start a new project?")) {
         return;
     }
-    setGlyphObjects([]);
-    setLoadedModels([]);
-    setPrimitiveObjects([]);
-    setObjectTransforms({});
-    setObjectModifiers({});
-    setObjectSettings({});
-    setObjectParameters({});
-    setObjectOscillators({});
-    // FIX: Changed from `[]` to `{}` to match the state's type `Record<string, OntologicalParameter[]>`.
-    setOntologicalParameters({});
-    setRelationships([]);
-    setCustomScripts({});
-    setOntologicalMatrix(INITIAL_RELATIONSHIP_MATRIX);
-    setSelectedObjectKeys([]);
-    setConsoleLogs([]);
-    setCurrentProjectId(null);
-    setIsDirty(false);
-    logToIDE("New project started.", 'system');
+    try {
+        setIsProcessing(true);
+        const { projectId } = await backendService.createNewWorkspace();
+        setCurrentProjectId(projectId);
+
+        setGlyphObjects([]); setLoadedModels([]); setPrimitiveObjects([]);
+        setObjectTransforms({}); setObjectModifiers({}); setObjectSettings({});
+        setObjectParameters({}); setObjectOscillators({}); setOntologicalParameters({});
+        setRelationships([]); setCustomScripts({}); setOntologicalMatrix(INITIAL_RELATIONSHIP_MATRIX);
+        setIntegrations(INITIAL_INTEGRATIONS); setActiveIntegrationUrl(INITIAL_INTEGRATIONS[0]?.url || '');
+        setSelectedObjectKeys([]); setConsoleLogs([]);
+        
+        setIsDirty(false);
+        logToIDE(`New project started with ID: ${projectId}`, 'system');
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        logToIDE(`Error creating new project: ${message}`, 'error');
+    } finally {
+        setIsProcessing(false);
+    }
   }, [isDirty, logToIDE]);
+  
+  // Create an initial project when the app loads
+  useEffect(() => {
+    handleNewProject();
+  }, []);
 
   const handleSaveProject = useCallback(async () => {
+    if (!currentProjectId) {
+        logToIDE('No active project to save.', 'error');
+        return;
+    }
     try {
         const state = getProjectState();
-        const { projectId } = await backendService.saveProject(state);
-        setCurrentProjectId(projectId);
+        await backendService.saveProjectState(currentProjectId, state);
         setIsDirty(false);
-        logToIDE(`Project saved with ID: ${projectId}`, 'success');
+        logToIDE(`Project ${currentProjectId} saved.`, 'success');
     } catch(e) {
         const message = e instanceof Error ? e.message : String(e);
         logToIDE(`Error saving project: ${message}`, 'error');
     }
-  }, [getProjectState, logToIDE]);
-  
-  const handleLoadProjectFromServer = useCallback(async () => {
-    const projectId = window.prompt("Enter Project ID to load:");
-    if (!projectId) return;
+  }, [currentProjectId, getProjectState, logToIDE]);
 
-    if (isDirty && !window.confirm("You have unsaved changes that will be lost. Continue?")) {
+  const handleExportProject = useCallback(async () => {
+    if (!currentProjectId) {
+        logToIDE('No active project to download.', 'error');
         return;
     }
-
     try {
-        const state = await backendService.loadProject(projectId);
-        loadProjectState(state);
-        setCurrentProjectId(projectId);
-    } catch(e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Error loading project: ${message}`, 'error');
-    }
-  }, [isDirty, loadProjectState, logToIDE]);
+        logToIDE(`Preparing project ${currentProjectId} for download...`, 'info');
+        // First, save the current state to ensure the archive is up-to-date
+        await handleSaveProject();
 
-  const handleExportProject = useCallback(() => {
-    const state = getProjectState();
-    const blob = new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `myos-project-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    logToIDE('Project exported to file.', 'success');
-  }, [getProjectState, logToIDE]);
+        const blob = await backendService.downloadProject(currentProjectId);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${currentProjectId}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        logToIDE('Project downloaded successfully.', 'success');
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        logToIDE(`Failed to download project: ${message}`, 'error');
+    }
+  }, [currentProjectId, handleSaveProject, logToIDE]);
 
   const handleImportProject = useCallback(() => {
     if (isDirty && !window.confirm("You have unsaved changes that will be lost. Continue?")) {
@@ -759,32 +800,32 @@ export const App: React.FC = () => {
     importProjectInputRef.current?.click();
   }, [isDirty]);
 
-  const handleImportProjectFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportProjectFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const content = e.target?.result as string;
-            const state = JSON.parse(content);
-            loadProjectState(state);
-            setCurrentProjectId(null); // Imported project doesn't have a server ID
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            logToIDE(`Failed to import project file: ${message}`, 'error');
-        }
-    };
-    reader.readAsText(file);
-    if(event.target) event.target.value = ''; // Reset input
+    try {
+        setIsProcessing(true);
+        logToIDE(`Uploading project ${file.name}...`, 'info');
+        const { projectId: newProjectId } = await backendService.uploadProject(file);
+        logToIDE(`Project uploaded. New ID: ${newProjectId}. Loading state...`, 'info');
+        
+        const state = await backendService.loadProjectState(newProjectId);
+        await loadProjectState(state);
+        setCurrentProjectId(newProjectId);
+        
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logToIDE(`Failed to import project: ${message}`, 'error');
+    } finally {
+        setIsProcessing(false);
+        if(event.target) event.target.value = ''; // Reset input
+    }
   }, [loadProjectState, logToIDE]);
 
   const handleExportOntology = useCallback(() => {
     try {
-      const schema: OntologicalSchema = {
-        relationshipMatrix: ontologicalMatrix,
-        customScripts,
-      };
+      const schema: OntologicalSchema = { relationshipMatrix: ontologicalMatrix, customScripts };
       const buffer = writeGlb(schema);
       const blob = new Blob([buffer], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
@@ -845,19 +886,19 @@ export const App: React.FC = () => {
             onSaveScene={() => viewerRef.current?.saveScene()}
             onNewProject={handleNewProject}
             onSaveProject={handleSaveProject}
-            onLoadProjectFromServer={handleLoadProjectFromServer}
             onImportProject={handleImportProject}
             onExportProject={handleExportProject}
             onImportOntology={handleImportOntology}
             onExportOntology={handleExportOntology}
             onCreatePrimitive={() => setIsCreateModalOpen(true)}
+            onIntegrateWebsite={() => setIsIntegrateModalOpen(true)}
           />
         </div>
         <div className="flex items-center space-x-2 text-xs">
             <span className={`px-2 py-1 rounded ${isDirty ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
                 {isDirty ? 'Unsaved' : 'Saved'}
             </span>
-            {currentProjectId && <span className="text-gray-500 font-mono">{currentProjectId}</span>}
+            {currentProjectId && <span className="text-gray-500 font-mono" title={`Current Project ID: ${currentProjectId}`}>{currentProjectId}</span>}
         </div>
       </header>
 
@@ -950,7 +991,7 @@ export const App: React.FC = () => {
                     <PanelResizeHandle className="w-1 bg-bg-dark hover:bg-brand-primary transition-colors" />
                     <Panel defaultSize={50} minSize={25}>
                          <UnityHubPanel
-                            integrations={INTEGRATIONS}
+                            integrations={integrations}
                             activeUrl={activeIntegrationUrl}
                             setActiveUrl={setActiveIntegrationUrl}
                          />
@@ -978,11 +1019,16 @@ export const App: React.FC = () => {
           relation={editingRelation}
           existingScript={editingRelation ? customScripts[`${editingRelation.row.replace(/\//g, 'Or')}_${editingRelation.name.replace(/\//g, 'Or')}_${editingRelation.col.replace(/\//g, 'Or')}`] : undefined}
       />
+      <IntegrateWebsiteModal
+        isOpen={isIntegrateModalOpen}
+        onClose={() => setIsIntegrateModalOpen(false)}
+        onAdd={handleAddIntegration}
+      />
       <input
         type="file"
         ref={importProjectInputRef}
         onChange={handleImportProjectFile}
-        accept=".json"
+        accept=".zip"
         style={{ display: 'none' }}
         aria-hidden="true"
       />

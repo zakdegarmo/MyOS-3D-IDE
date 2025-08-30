@@ -2,16 +2,24 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const { spawn } = require('child_process');
+const fileUpload = require('express-fileupload');
+const archiver = require('archiver');
+const AdmZip = require('adm-zip');
 const { GoogleGenAI } = require("@google/genai");
 const { knowledgeBase } = require('./knowledgeBase');
 
 const app = express();
 const PORT = 3001;
 const PROJECTS_DIR = path.join(__dirname, 'projects');
+const WORKSPACES_DIR = path.join(__dirname, 'workspaces');
+
 
 // --- Middleware ---
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Increased limit for potentially large GLB data
+app.use(express.json({ limit: '50mb' }));
+app.use(fileUpload());
+
 
 // --- Gemini AI Initialization ---
 let ai;
@@ -29,18 +37,10 @@ try {
 
 // --- Vector DB Implementation ---
 let vectorDB = [];
-// NOTE: As per user request for vector DB, using a standard embedding model.
-// This assumes 'text-embedding-004' is available for use with the Gemini API.
 const EMBEDDING_MODEL_NAME = 'text-embedding-004'; 
-const SIMILARITY_THRESHOLD = 0.7; // Minimum similarity score to be considered relevant
-const TOP_K_RESULTS = 3; // Number of top results to retrieve
+const SIMILARITY_THRESHOLD = 0.7;
+const TOP_K_RESULTS = 3;
 
-/**
- * Calculates the cosine similarity between two vectors.
- * @param {number[]} vecA The first vector.
- * @param {number[]} vecB The second vector.
- * @returns {number} The cosine similarity score between 0 and 1.
- */
 function cosineSimilarity(vecA, vecB) {
     if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
     let dotProduct = 0.0;
@@ -55,9 +55,6 @@ function cosineSimilarity(vecA, vecB) {
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-/**
- * Initializes the in-memory vector database by generating embeddings for the knowledge base.
- */
 async function initializeVectorDB() {
     if (!ai) {
         console.warn('[VectorDB] AI client not initialized, skipping vector DB creation.');
@@ -67,7 +64,6 @@ async function initializeVectorDB() {
     try {
         const contentsToEmbed = knowledgeBase.map(item => ({ text: item.content }));
         
-        // Use the batch embedding feature for efficiency
         const response = await ai.models.embedContent({
             model: EMBEDDING_MODEL_NAME,
             contents: contentsToEmbed.map(c => c.text),
@@ -81,18 +77,16 @@ async function initializeVectorDB() {
         console.log(`[VectorDB] Successfully created ${vectorDB.length} embeddings. Database is ready.`);
     } catch (error) {
         console.error('[VectorDB] Failed to initialize vector database:', error.message);
-        // The server can still run, but AI queries will be degraded.
     }
 }
 
 
 // --- Helper Functions ---
-const ensureProjectsDir = async () => {
+const ensureDir = async (dir) => {
     try {
-        await fs.mkdir(PROJECTS_DIR, { recursive: true });
-        console.log(`[MyOS Server] Projects directory is ready at: ${PROJECTS_DIR}`);
+        await fs.mkdir(dir, { recursive: true });
     } catch (error) {
-        console.error('[MyOS Server] Could not create projects directory:', error);
+        console.error(`[MyOS Server] Could not create directory: ${dir}`, error);
         process.exit(1);
     }
 };
@@ -101,12 +95,6 @@ console.log('[MyOS Server] Initializing a clean, functional backend...');
 
 // --- API Endpoints ---
 
-/**
- * POST /api/ai-query
- * Handles natural language queries using a Retrieval-Augmented Generation (RAG) pipeline.
- * It streams a newline-delimited JSON (NDJSON) response. First, it sends a 'source' object
- * with the retrieved context, then streams 'chunk' objects with the generated text.
- */
 app.post('/api/ai-query', async (req, res) => {
     if (!ai) {
         return res.status(503).send("AI service is not available. Check server logs for details.");
@@ -122,7 +110,6 @@ app.post('/api/ai-query', async (req, res) => {
         res.setHeader('Content-Type', 'application/x-ndjson');
         res.setHeader('Transfer-Encoding', 'chunked');
         
-        // --- 1. Retrieval Step (Vector Search) ---
         if (vectorDB.length > 0) {
             console.log('[AI Query] RAG Step 1: Performing vector search for query:', query);
             
@@ -146,7 +133,6 @@ app.post('/api/ai-query', async (req, res) => {
                 context = relevantItems.map(item => `Concept: ${item.concept}\nContent:\n${item.content}`).join('\n\n---\n\n');
                 console.log(`[AI Query] RAG Step 1: Retrieved ${relevantItems.length} context sections.`);
                 
-                // Stream the sources back to the client
                 const sourcesPayload = relevantItems.map(item => ({ concept: item.concept, similarity: item.similarity }));
                 res.write(JSON.stringify({ type: 'source', payload: sourcesPayload }) + '\n');
             } else {
@@ -156,7 +142,6 @@ app.post('/api/ai-query', async (req, res) => {
             console.warn('[AI Query] Vector DB not initialized. Cannot perform semantic search.');
         }
 
-        // --- 2. Generation Step (Streaming) ---
         console.log('[AI Query] RAG Step 2: Generating streaming response.');
         
         const generationPrompt = `
@@ -191,7 +176,6 @@ Your Expert Answer:
 
     } catch (error) {
         console.error('[AI Query] Error processing AI query:', error);
-        // Ensure the response stream is properly ended on error
         if (!res.headersSent) {
             res.status(500).send(`An error occurred while processing the AI query: ${error.message}`);
         } else {
@@ -200,10 +184,6 @@ Your Expert Answer:
     }
 });
 
-/**
- * POST /api/analyze-code
- * Receives a code snippet and streams back an AI-powered analysis.
- */
 app.post('/api/analyze-code', async (req, res) => {
     if (!ai) {
         return res.status(503).send("AI service is not available.");
@@ -265,70 +245,204 @@ Provide your analysis in clear, readable markdown. Start each section with a hea
 });
 
 
-// --- Project Save/Load Endpoints ---
+/**
+ * POST /api/execute-bun
+ * Executes any `bun` command within a specified project workspace.
+ */
+app.post('/api/execute-bun', (req, res) => {
+    const { command, projectId } = req.body;
+    
+    if (!command || typeof command !== 'string' || !command.startsWith('bun')) {
+        return res.status(400).send('Invalid command provided. Must be a string starting with "bun".');
+    }
+    if (!projectId || typeof projectId !== 'string' || projectId.includes('..') || projectId.includes('/')) {
+        return res.status(400).send('Invalid or missing projectId.');
+    }
+
+    const workspacePath = path.join(WORKSPACES_DIR, projectId);
+    // Security: Check if workspace exists before proceeding.
+    fs.stat(workspacePath).catch(() => {
+        return res.status(404).send('Project workspace not found.');
+    });
+
+    const parts = command.trim().split(/\s+/);
+    const bunCmd = parts[0]; // should be 'bun'
+    const args = parts.slice(1);
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    
+    // Using spawn with an array of args is safer against command injection.
+    const bunProcess = spawn(bunCmd, args, { cwd: workspacePath });
+    console.log(`[Bun Command] In [${projectId}]: Executing: ${command}`);
+
+    const streamData = (type, data) => {
+        res.write(JSON.stringify({ type, payload: data.toString() }) + '\n');
+    };
+
+    bunProcess.stdout.on('data', (data) => streamData('stdout', data));
+    bunProcess.stderr.on('data', (data) => streamData('stderr', data));
+
+    bunProcess.on('close', (code) => {
+        console.log(`[Bun Command] Process for [${projectId}] exited with code ${code}`);
+        streamData('exit', `Process finished with code ${code}.`);
+        res.end();
+    });
+
+    bunProcess.on('error', (err) => {
+        console.error(`[Bun Command] Failed to start subprocess for [${projectId}].`, err);
+        if (!res.headersSent) {
+            res.status(500).send('Failed to start the bun process.');
+        } else {
+            streamData('stderr', `Failed to start subprocess: ${err.message}`);
+            res.end();
+        }
+    });
+});
+
+
+// --- Project Workspace Endpoints ---
 
 /**
- * POST /api/projects
- * Saves the entire frontend state to a new JSON file on the server.
+ * POST /api/workspaces/new
+ * Creates a new, empty project workspace on the server.
  */
-app.post('/api/projects', async (req, res) => {
+app.post('/api/workspaces/new', async (req, res) => {
     try {
-        const projectState = req.body;
-        if (!projectState || typeof projectState !== 'object' || Object.keys(projectState).length === 0) {
-            return res.status(400).json({ status: 'error', message: 'Invalid or empty project state received.' });
-        }
+        const projectId = `proj-${Date.now()}`;
+        const workspacePath = path.join(WORKSPACES_DIR, projectId);
+        await fs.mkdir(workspacePath, { recursive: true });
+
+        // Create a default package.json
+        const defaultPackageJson = {
+            name: projectId,
+            module: "index.ts",
+            type: "module",
+            scripts: {
+                "dev": "bun run --hot index.ts"
+            },
+            devDependencies: {
+                "bun-types": "latest"
+            },
+            peerDependencies: {
+                "typescript": "^5.0.0"
+            }
+        };
+        await fs.writeFile(path.join(workspacePath, 'package.json'), JSON.stringify(defaultPackageJson, null, 2));
         
-        const projectId = `project-${Date.now()}.json`;
-        const filePath = path.join(PROJECTS_DIR, projectId);
-
-        await fs.writeFile(filePath, JSON.stringify(projectState, null, 2));
-
-        console.log(`[MyOS Server] Saved project ${projectId}`);
+        console.log(`[Workspaces] Created new project: ${projectId}`);
         res.status(201).json({ success: true, projectId });
 
     } catch (error) {
-        console.error('[MyOS Server] Error saving project:', error);
-        res.status(500).json({ status: 'error', message: 'Failed to save project on the server.' });
+        console.error('[Workspaces] Error creating new workspace:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to create new project on the server.' });
+    }
+});
+
+
+/**
+ * POST /api/workspaces/upload
+ * Uploads a .zip file, extracts it into a new workspace.
+ */
+app.post('/api/workspaces/upload', async (req, res) => {
+    if (!req.files || Object.keys(req.files).length === 0) {
+        return res.status(400).send('No files were uploaded.');
+    }
+
+    try {
+        const projectFile = req.files.projectFile; // Assumes input name is 'projectFile'
+        const projectId = `proj-upload-${Date.now()}`;
+        const workspacePath = path.join(WORKSPACES_DIR, projectId);
+        await fs.mkdir(workspacePath, { recursive: true });
+        
+        // Use adm-zip to extract the uploaded file buffer
+        const zip = new AdmZip(projectFile.data);
+        zip.extractAllTo(workspacePath, /*overwrite*/ true);
+
+        console.log(`[Workspaces] Uploaded and extracted project to ${projectId}`);
+        res.status(201).json({ success: true, projectId });
+    } catch (error) {
+        console.error('[Workspaces] Error uploading project:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to upload and extract project.' });
     }
 });
 
 /**
- * GET /api/projects/:id
- * Loads a project state from a JSON file on the server.
+ * GET /api/workspaces/:id/download
+ * Zips and downloads an entire project workspace.
  */
-app.get('/api/projects/:id', async (req, res) => {
+app.get('/api/workspaces/:id/download', (req, res) => {
+    const { id } = req.params;
+    if (!id || id.includes('..') || id.includes('/')) {
+        return res.status(400).send('Invalid project ID format.');
+    }
+    
+    const workspacePath = path.join(WORKSPACES_DIR, id);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    res.attachment(`${id}.zip`);
+    archive.pipe(res);
+    archive.directory(workspacePath, false);
+    
+    archive.on('error', (err) => {
+        res.status(500).send({error: err.message});
+    });
+
+    archive.finalize();
+    console.log(`[Workspaces] Zipping and downloading project: ${id}`);
+});
+
+/**
+ * POST /api/workspaces/:id/state
+ * Saves the IDE's state JSON to the project workspace.
+ */
+app.post('/api/workspaces/:id/state', async (req, res) => {
     try {
         const { id } = req.params;
-        // Basic security check to prevent path traversal
         if (!id || id.includes('..') || id.includes('/')) {
             return res.status(400).json({ status: 'error', message: 'Invalid project ID format.' });
         }
-        
-        const filePath = path.join(PROJECTS_DIR, id);
+        const filePath = path.join(WORKSPACES_DIR, id, 'myos-project.json');
+        await fs.writeFile(filePath, JSON.stringify(req.body, null, 2));
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error('[Workspaces] Error saving project state:', error);
+        res.status(500).json({ status: 'error', message: 'Failed to save project state.' });
+    }
+});
 
+/**
+ * GET /api/workspaces/:id/state
+ * Loads the IDE's state JSON from the project workspace.
+ */
+app.get('/api/workspaces/:id/state', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!id || id.includes('..') || id.includes('/')) {
+            return res.status(400).json({ status: 'error', message: 'Invalid project ID format.' });
+        }
+        const filePath = path.join(WORKSPACES_DIR, id, 'myos-project.json');
         const data = await fs.readFile(filePath, 'utf8');
-
-        console.log(`[MyOS Server] Loaded project ${id}`);
         res.setHeader('Content-Type', 'application/json');
         res.send(data);
-
     } catch (error) {
-        if (error.code === 'ENOENT') {
-             console.error(`[MyOS Server] Project not found: ${req.params.id}`);
-             return res.status(404).json({ status: 'error', message: 'Project not found.' });
+         if (error.code === 'ENOENT') {
+             console.log(`[Workspaces] No state file found for ${req.params.id}, returning empty state.`);
+             return res.status(200).json({}); // Return empty object if no state file exists
         }
-        console.error(`[MyOS Server] Error loading project ${req.params.id}:`, error);
-        res.status(500).json({ status: 'error', message: 'Failed to load project from the server.' });
+        console.error(`[Workspaces] Error loading project state ${req.params.id}:`, error);
+        res.status(500).json({ status: 'error', message: 'Failed to load project state.' });
     }
 });
 
 
 // --- Start Server ---
 app.listen(PORT, async () => {
-    await ensureProjectsDir(); // Make sure the directory exists before starting
-    await initializeVectorDB(); // Initialize the in-memory vector DB on startup
+    await ensureDir(PROJECTS_DIR);
+    await ensureDir(WORKSPACES_DIR);
+    await initializeVectorDB();
     console.log(`[MyOS Server] Backend server is live and listening on http://localhost:${PORT}`);
-    console.log('[MyOS Server] Project Save/Load endpoints are active.');
+    console.log('[MyOS Server] Workspace and command endpoints are active.');
     if (ai) {
         console.log('[MyOS Server] AI Query endpoint is active.');
     } else {

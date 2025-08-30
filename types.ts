@@ -131,6 +131,7 @@ export interface ProjectState {
     relationships: Relationship[];
     customScripts: Record<string, string>;
     ontologicalMatrix: Record<string, Record<string, string>>;
+    integrations: Integration[];
 }
 
 // --- Ontology Schema for GLB serialization ---
