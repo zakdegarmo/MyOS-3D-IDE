@@ -82,18 +82,17 @@ const INITIAL_RELATIONSHIP_MATRIX: Record<string, Record<string, string>> = {
   }
 };
 const INTEGRATIONS: Integration[] = [
-    { title: "0-Nexus", url: "https://0-nexus.vercel.app/" },
-    { title: "3D Font Explorer", url: "https://3d-ttf.vercel.app/" },
-    { title: "Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
-    { title: "Hyper Aether Pilgrim", url: "https://hyper-aether-pilgrim-git-dev-zachary-degarmos-projects.vercel.app/" },
-    { title: "3D File Explorer", url: "https://3-d-file-explorer-git-main-zachary-degarmos-projects.vercel.app/" },
-    { title: "Atom-Visualizer", url: "https://atom-vis.vercel.app/" },
-    { title: "MyOS Nexus Page Editor", url: "https://nexus-page-editor.vercel.app/" },
-    { title: "MyOS IDE", url: "https://my-os-3-d-ide.vercel.app/" },
+    { title: "MyOS 3D 0=1 Nexus", url: "https://0-nexus.vercel.app/" },
+    { title: "MyOS 3D Font Explorer", url: "https://3d-ttf.vercel.app/" },
+    { title: "MyOS 3D Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
+    { title: "MyOS 3D File Explorer", url: "https://3-d-file-explorer.vercel.app/" },
+    { title: "MyOS 3D Hyperlink Browser", url: "https://hyper-aether-pilgrim.vercel.app/" },
+    { title: "MyOS 3D Atom-Visualizer", url: "https://atom-vis.vercel.app/" },
+    { title: "MyOS 3D Nexus Page Editor", url: "https://nexus-page-editor.vercel.app/" },
+    { title: "MyOS 3D IDE", url: "https://my-os-3-d-ide.vercel.app/" },
     { title: "Zak's Notepad", url: "https://zakdegarmo.github.io/ZaksNotepad/index.html" },
     { title: "MyOntology Docs", url: "https://zakdegarmo.github.io/MyOntology/" }
 ];
-
 const CreateModal: React.FC<{ isOpen: boolean; onClose: () => void; children: React.ReactNode }> = ({ isOpen, onClose, children }) => {
   if (!isOpen) return null;
   return (
