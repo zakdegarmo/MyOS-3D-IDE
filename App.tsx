@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
@@ -93,6 +94,7 @@ const INTEGRATIONS: Integration[] = [
     { title: "Zak's Notepad", url: "https://zakdegarmo.github.io/ZaksNotepad/index.html" },
     { title: "MyOntology Docs", url: "https://zakdegarmo.github.io/MyOntology/" }
 ];
+
 const CreateModal: React.FC<{ isOpen: boolean; onClose: () => void; children: React.ReactNode }> = ({ isOpen, onClose, children }) => {
   if (!isOpen) return null;
   return (
@@ -874,6 +876,10 @@ export const App: React.FC = () => {
                                     setSelectedObjectKeys={setSelectedObjectKeys}
                                     onDeleteObject={handleDeleteObject}
                                     onUpdateObjectData={handleUpdateObjectData}
+                                    objectParameters={objectParameters}
+                                    objectSettings={objectSettings}
+                                    objectModifiers={objectModifiers}
+                                    objectTransforms={objectTransforms}
                                 />
                             </Panel>
                             <PanelResizeHandle className="h-1 bg-bg-dark hover:bg-brand-primary transition-colors" />
