@@ -8,7 +8,6 @@ const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const { GoogleGenAI } = require("@google/genai");
 const { knowledgeBase } = require('./knowledgeBase');
-const fetch = require('node-fetch');
 
 const app = express();
 const PORT = 3001;
@@ -299,50 +298,6 @@ app.post('/api/execute-bun', (req, res) => {
             res.end();
         }
     });
-});
-
-/**
- * POST /api/proxy
- * Forwards a request from this backend to another service.
- * This enables backend-to-backend communication initiated by the client console.
- */
-app.post('/api/proxy', async (req, res) => {
-    const { targetUrl, payload, method = 'GET' } = req.body;
-
-    if (!targetUrl) {
-        return res.status(400).json({ status: 'error', message: 'targetUrl is required.' });
-    }
-
-    try {
-        console.log(`[Proxy Call] Forwarding ${method} request to: ${targetUrl}`);
-        const options = {
-            method: method,
-            headers: {
-                'Content-Type': 'application/json',
-                // Forward any other important headers if necessary
-            }
-        };
-
-        if (payload && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-            options.body = JSON.stringify(payload);
-        }
-
-        const proxyResponse = await fetch(targetUrl, options);
-        
-        // Check if the response is JSON or text
-        const contentType = proxyResponse.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            const data = await proxyResponse.json();
-            res.status(proxyResponse.status).json(data);
-        } else {
-            const text = await proxyResponse.text();
-            res.status(proxyResponse.status).send(text);
-        }
-
-    } catch (error) {
-        console.error('[Proxy Call] Error forwarding request:', error);
-        res.status(500).json({ status: 'error', message: `Failed to proxy request: ${error.message}` });
-    }
 });
 
 

@@ -364,39 +364,6 @@ export const App: React.FC = () => {
     });
   }, [logToIDE, currentProjectId]);
   
-  const handleProxyCallCommand = useCallback(async (command: string) => {
-    const parts = command.split(/\s+/);
-    // proxy_call <METHOD> <URL> [JSON_PAYLOAD]
-    if (parts.length < 3) {
-      logToIDE("Usage: proxy_call <METHOD> <URL> [JSON_PAYLOAD]", 'error');
-      return;
-    }
-    const method = parts[1].toUpperCase();
-    const url = parts[2];
-    let payload = null;
-
-    if (parts.length > 3) {
-        const jsonString = parts.slice(3).join(' ');
-        try {
-            payload = JSON.parse(jsonString);
-        } catch (e) {
-            const message = e instanceof Error ? e.message : String(e);
-            logToIDE(`Invalid JSON payload: ${message}`, 'error');
-            return;
-        }
-    }
-
-    logToIDE(`Proxying ${method} to ${url}...`, 'system');
-    try {
-        const result = await backendService.proxyCall(url, method, payload);
-        const resultString = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-        logToIDE(`Proxy Response:\n${resultString}`, 'out');
-    } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Proxy Error: ${message}`, 'error');
-    }
-  }, [logToIDE]);
-  
   const handleCommand = useCallback((command: string) => {
     logToIDE(command, 'in');
     const [cmd, ...args] = command.toLowerCase().split(/\s+/);
@@ -412,12 +379,6 @@ export const App: React.FC = () => {
         return;
     }
     
-    // --- Proxy command for backend-to-backend communication ---
-    if (cmd === 'proxy_call') {
-        handleProxyCallCommand(command);
-        return;
-    }
-
     // --- Client-side commands ---
     if (cmd === 'oscillate' || cmd === 'stop') {
         if (selectedObjectKeys.length !== 1) {
@@ -476,7 +437,7 @@ export const App: React.FC = () => {
         const message = err instanceof Error ? err.message : String(err);
         logToIDE(`AI Query Error: ${message}`, 'error');
     });
-  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand, handleBunCommand, handleProxyCallCommand]);
+  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand, handleBunCommand]);
 
 
   const handleDeleteObject = useCallback((keyToDelete: string) => {

@@ -130,43 +130,6 @@ class BackendService {
         }
     }
 
-    /**
-     * Sends a request to the main backend, which will then proxy it to the targetUrl.
-     * This is for backend-to-backend communication.
-     */
-    public async proxyCall(targetUrl: string, method: string = 'GET', payload?: any): Promise<any> {
-        try {
-            const response = await fetch(`${BASE_URL}/proxy`, {
-                method: 'POST', // The proxy endpoint itself is always POST
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ targetUrl, method, payload }),
-            });
-
-            const contentType = response.headers.get("content-type");
-            let responseData;
-            if (contentType && contentType.indexOf("application/json") !== -1) {
-                responseData = await response.json();
-            } else {
-                responseData = await response.text();
-            }
-
-            if (!response.ok) {
-                const errorMessage = typeof responseData === 'object' ? responseData.message : responseData;
-                throw new Error(errorMessage || `Proxy call failed with status ${response.status}`);
-            }
-
-            return responseData;
-
-        } catch (error: any) {
-            console.error('[BackendService] Proxy Call error:', error);
-             const errorMessage = error.message.includes('Failed to fetch')
-              ? 'Proxy call failed. Could not connect to the backend server.'
-              : error.message;
-            throw new Error(errorMessage);
-        }
-    }
-
-
     // --- Workspace and Project Management ---
 
     public async createNewWorkspace(): Promise<{ projectId: string }> {
