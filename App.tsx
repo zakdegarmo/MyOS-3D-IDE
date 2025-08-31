@@ -85,7 +85,7 @@ const INITIAL_INTEGRATIONS: Integration[] = [
     { title: "MyOS 3D Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
     { title: "MyOS 3D File Explorer", url: "https://3-d-file-explorer.vercel.app/" },
     { title: "MyOS 3D Hyperlink Browser", url: "https://hyper-aether-pilgrim.vercel.app/" },
-    { title: "MyOS 3D Atom-Visualizer", url: "https://atom-vis.vercel.app/" },
+    { title: "MyOS 3D Atom-Visualizer", url: "https://3d-molecule-lab.vercel.app/" },
     { title: "MyOS 3D Nexus Page Editor", url: "https://nexus-page-editor.vercel.app/" },
     { title: "MyOS 3D IDE", url: "https://my-os-3-d-ide.vercel.app/" },
     { title: "Zak's Notepad", url: "https://zakdegarmo.github.io/ZaksNotepad/index.html" },
