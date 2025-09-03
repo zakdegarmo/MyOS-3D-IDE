@@ -4,25 +4,66 @@ import { ChevronDownIcon, SceneIcon, TrashIcon } from '../components/icons';
 import { getDisplayName } from '../utils/getDisplayName';
 import type { GlyphObject, LoadedModel, PrimitiveObject, TransformState, ModifiersState, ObjectGeometrySettings } from '../types';
 
-// --- JSON VIEWER COMPONENT ---
-const JsonNode: React.FC<{ nodeKey: string; nodeValue: any; isRoot?: boolean; level?: number }> = ({ nodeKey, nodeValue, isRoot = false, level = 0 }) => {
-    const [isExpanded, setIsExpanded] = useState(isRoot);
+// --- EDITABLE JSON VIEWER COMPONENT ---
+const EditableJsonNode: React.FC<{
+    path: string;
+    nodeKey: string;
+    nodeValue: any;
+    level?: number;
+    isRoot?: boolean;
+    onUpdate: (path: string, value: any) => void;
+}> = ({ path, nodeKey, nodeValue, level = 0, isRoot = false, onUpdate }) => {
+    const [isExpanded, setIsExpanded] = useState(isRoot || level < 1);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+
     const isObject = typeof nodeValue === 'object' && nodeValue !== null;
     const isArray = Array.isArray(nodeValue);
     const isExpandable = isObject && Object.keys(nodeValue).length > 0;
+    const isEditable = !isObject && nodeValue !== null && typeof nodeValue !== 'undefined';
 
-    const toggleExpand = (e: React.MouseEvent) => {
+    const handleEditStart = (e: React.MouseEvent) => {
+        if (!isEditable) return;
         e.stopPropagation();
-        if (isExpandable) {
-            setIsExpanded(!isExpanded);
+        setEditValue(String(nodeValue));
+        setIsEditing(true);
+    };
+
+    const handleEditCommit = () => {
+        const originalType = typeof nodeValue;
+        let newValue: any = editValue;
+        if (originalType === 'number') newValue = parseFloat(editValue);
+        if (originalType === 'boolean') newValue = editValue.toLowerCase() === 'true';
+        if (String(nodeValue) !== String(newValue)) {
+            onUpdate(path, newValue);
         }
+        setIsEditing(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') handleEditCommit();
+        if (e.key === 'Escape') setIsEditing(false);
     };
 
     const renderValue = () => {
-        if (nodeValue === null) return <span className="text-purple-400">null</span>;
-        if (typeof nodeValue === 'string') return <span className="text-green-400">"{nodeValue}"</span>;
-        if (typeof nodeValue === 'number') return <span className="text-blue-400">{nodeValue}</span>;
-        if (typeof nodeValue === 'boolean') return <span className="text-purple-400">{String(nodeValue)}</span>;
+        if (isEditing) {
+            return (
+                <input
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={handleEditCommit}
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                    className="bg-bg-dark text-white p-0 m-0 border border-brand-primary rounded-sm outline-none"
+                    onClick={(e) => e.stopPropagation()}
+                />
+            );
+        }
+        if (nodeValue === null) return <span className="text-purple-400" onClick={handleEditStart}>null</span>;
+        if (typeof nodeValue === 'string') return <span className="text-green-400" onClick={handleEditStart}>"{nodeValue}"</span>;
+        if (typeof nodeValue === 'number') return <span className="text-blue-400" onClick={handleEditStart}>{nodeValue}</span>;
+        if (typeof nodeValue === 'boolean') return <span className="text-purple-400" onClick={handleEditStart}>{String(nodeValue)}</span>;
         if (isArray) return <span className="text-gray-500">Array({nodeValue.length})</span>;
         if (isObject) return <span className="text-gray-500">Object</span>;
         return String(nodeValue);
@@ -32,7 +73,7 @@ const JsonNode: React.FC<{ nodeKey: string; nodeValue: any; isRoot?: boolean; le
         <div style={{ paddingLeft: level > 0 ? '1rem' : '0' }} className="font-mono text-xs">
             <div
                 className={`flex items-center cursor-pointer ${isExpandable ? '' : 'cursor-default'}`}
-                onClick={toggleExpand}
+                onClick={(e) => { e.stopPropagation(); if (isExpandable) setIsExpanded(!isExpanded); }}
             >
                 {isExpandable && (
                     <ChevronDownIcon className={`w-3 h-3 mr-1 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-0' : '-rotate-90'}`} />
@@ -43,14 +84,20 @@ const JsonNode: React.FC<{ nodeKey: string; nodeValue: any; isRoot?: boolean; le
             {isExpanded && isObject && (
                 <div className="border-l border-gray-700 ml-1.5 pl-2">
                     {Object.entries(nodeValue).map(([key, value]) => (
-                        <JsonNode key={key} nodeKey={key} nodeValue={value} level={level + 1} />
+                        <EditableJsonNode
+                            key={key}
+                            path={`${path}.${key}`}
+                            nodeKey={key}
+                            nodeValue={value}
+                            level={level + 1}
+                            onUpdate={onUpdate}
+                        />
                     ))}
                 </div>
             )}
         </div>
     );
 };
-
 
 interface HierarchyPanelProps {
     glyphObjects: GlyphObject[];
@@ -59,8 +106,7 @@ interface HierarchyPanelProps {
     selectedObjectKeys: string[];
     setSelectedObjectKeys: (updater: React.SetStateAction<string[]>) => void;
     onDeleteObject: (key: string) => void;
-    onUpdateObjectData: (key: string, newData: any) => void;
-    // Data props for the viewer
+    onUpdateObjectProperty: (key: string, path: string, value: any) => void;
     objectTransforms: Record<string, TransformState>;
     objectModifiers: Record<string, ModifiersState>;
     objectSettings: Record<string, ObjectGeometrySettings>;
@@ -70,7 +116,7 @@ interface HierarchyPanelProps {
 export const HierarchyPanel: React.FC<HierarchyPanelProps> = (props) => {
     const { 
         glyphObjects, loadedModels, primitiveObjects, selectedObjectKeys, setSelectedObjectKeys,
-        onDeleteObject, objectTransforms, objectModifiers, objectSettings, objectParameters
+        onDeleteObject, onUpdateObjectProperty, objectTransforms, objectModifiers, objectSettings, objectParameters
     } = props;
 
     const [dataViewKey, setDataViewKey] = useState<string | null>(null);
@@ -92,10 +138,12 @@ export const HierarchyPanel: React.FC<HierarchyPanelProps> = (props) => {
             }
         });
     };
-
-    // FIX: Imported `useCallback` from React to resolve the "Cannot find name" error.
+    
     const getObjectData = useCallback((key: string) => {
         const data: Record<string, any> = {};
+        data.transform = objectTransforms[key];
+        data.modifiers = objectModifiers[key];
+
         if (key.startsWith('primitive-')) {
             data.parameters = objectParameters[key];
         } else if (key.startsWith('glyph-')) {
@@ -104,21 +152,16 @@ export const HierarchyPanel: React.FC<HierarchyPanelProps> = (props) => {
             const model = loadedModels.find(m => m.id === key);
             data.info = { filename: model?.filename, identity: model?.identity };
         }
-        data.transform = objectTransforms[key];
-        data.modifiers = objectModifiers[key];
         
-        // Clean up undefined/null properties for a cleaner view
         Object.keys(data).forEach(k => {
-            if (data[k] === undefined || data[k] === null) {
-                delete data[k];
-            }
+            if (data[k] === undefined || data[k] === null) delete data[k];
         });
 
         return data;
-    }, [loadedModels, objectParameters, objectSettings, objectModifiers, objectTransforms]);
+    }, [loadedModels, objectParameters, objectSettings, objectTransforms, objectModifiers]);
     
     return (
-        <div className="w-full h-full p-6 flex flex-col overflow-hidden">
+        <div className="w-full h-full p-4 flex flex-col overflow-hidden">
              <style>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: #1D232A; }
@@ -186,7 +229,16 @@ export const HierarchyPanel: React.FC<HierarchyPanelProps> = (props) => {
                                     </div>
                                     {isDataViewOpen && objectData && (
                                         <div className="p-3 bg-bg-light border-t border-gray-700/50 animate-fade-in">
-                                            <JsonNode nodeKey="data" nodeValue={objectData} isRoot />
+                                             {Object.entries(objectData).map(([dataKey, dataValue]) => (
+                                                <EditableJsonNode
+                                                    key={dataKey}
+                                                    path={dataKey}
+                                                    nodeKey={dataKey}
+                                                    nodeValue={dataValue}
+                                                    isRoot
+                                                    onUpdate={(path, value) => onUpdateObjectProperty(key, path, value)}
+                                                />
+                                            ))}
                                         </div>
                                     )}
                                 </li>

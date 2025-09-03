@@ -1,3 +1,9 @@
+
+
+
+
+
+
 import React, { useState, useEffect, useRef } from 'react';
 
 // Reusable DropdownMenu component
@@ -67,7 +73,6 @@ const MenuSeparator: React.FC = () => (
 );
 
 interface ToolbarProps {
-  onImportModel: (file: File) => void;
   onLoadFont: (file: File) => void;
   onCreateFromGlyph: () => void;
   isFontLoaded: boolean;
@@ -76,19 +81,20 @@ interface ToolbarProps {
   onSaveProject: () => void;
   onImportProject: () => void;
   onExportProject: () => void;
-  onImportOntology: () => void;
   onExportOntology: () => void;
   onCreatePrimitive: () => void;
   onIntegrateWebsite: () => void;
+  onCreateGlyphLibrary: () => void;
+  onConfigureAuth: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = (props) => {
   const { 
-    onImportModel, onLoadFont, onCreateFromGlyph, isFontLoaded, onSaveScene, 
+    onLoadFont, onCreateFromGlyph, isFontLoaded, onSaveScene, 
     onNewProject, onSaveProject, onImportProject, onExportProject,
-    onImportOntology, onExportOntology, onCreatePrimitive, onIntegrateWebsite
+    onExportOntology, onCreatePrimitive, onIntegrateWebsite, onCreateGlyphLibrary,
+    onConfigureAuth
   } = props;
-  const modelFileInputRef = useRef<HTMLInputElement>(null);
   const fontFileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>, callback: (file: File) => void) => {
@@ -105,14 +111,6 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
     <>
        <input
         type="file"
-        ref={modelFileInputRef}
-        onChange={(e) => handleFileChange(e, onImportModel)}
-        accept=".glb"
-        style={{ display: 'none' }}
-        aria-hidden="true"
-      />
-       <input
-        type="file"
         ref={fontFileInputRef}
         onChange={(e) => handleFileChange(e, onLoadFont)}
         accept=".ttf,.otf"
@@ -123,14 +121,12 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
         <DropdownMenu label="File">
           <MenuItem onClick={onNewProject}>New Project</MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={() => modelFileInputRef.current?.click()}>Import Model (.glb)...</MenuItem>
           <MenuItem onClick={() => fontFileInputRef.current?.click()}>Load Font (.ttf, .otf)...</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={onSaveProject}>Save Project</MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={onImportProject}>Import Project (.zip)...</MenuItem>
-          <MenuItem onClick={onExportProject}>Export Project (.zip)...</MenuItem>
-          <MenuItem onClick={onImportOntology}>Import Ontology (.glb)...</MenuItem>
+          <MenuItem onClick={onImportProject}>Import Project (.json)...</MenuItem>
+          <MenuItem onClick={onExportProject}>Export Project (.json)...</MenuItem>
           <MenuItem onClick={onExportOntology}>Export Ontology (.glb)...</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={onSaveScene}>Save Scene As (.glb)...</MenuItem>
@@ -141,6 +137,7 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
         <DropdownMenu label="Object">
           <MenuItem onClick={onCreatePrimitive}>Create Primitive...</MenuItem>
           <MenuItem onClick={onCreateFromGlyph} disabled={!isFontLoaded}>Create from Font Glyph...</MenuItem>
+          <MenuItem onClick={onCreateGlyphLibrary} disabled={!isFontLoaded}>Create glb library</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={() => console.log('Edit DOOR Data')} disabled>Edit DOOR Data...</MenuItem>
           <MenuItem onClick={() => console.log('View Relationships')} disabled>View Relationships</MenuItem>
@@ -152,6 +149,7 @@ export const Toolbar: React.FC<ToolbarProps> = (props) => {
         
         <DropdownMenu label="Integrations">
           <MenuItem onClick={onIntegrateWebsite}>Integrate New Website...</MenuItem>
+          <MenuItem onClick={onConfigureAuth}>Configure Auth Endpoint...</MenuItem>
           <MenuSeparator />
           <p className="px-3 py-1 text-xs text-gray-500 font-semibold uppercase">Installed</p>
           <MenuItem disabled>three.js</MenuItem>

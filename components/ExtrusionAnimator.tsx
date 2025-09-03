@@ -1,5 +1,5 @@
-/// <reference types="@react-three/fiber" />
-{/* FIX: Removed redundant `import '@react-three/fiber';`. The triple-slash directive is sufficient for type augmentation. */}
+// FIX: Removed the triple-slash directive and comment that were causing type resolution issues.
+// The standard import of `useFrame` from '@react-three/fiber' is sufficient to augment JSX types.
 import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';

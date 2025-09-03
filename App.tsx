@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
@@ -15,14 +16,17 @@ import { LoadingIcon } from './components/icons';
 import { GlyphSelectorModal } from './components/GlyphSelectorModal';
 import { FunctionEditorModal } from './components/FunctionEditorModal';
 import { IntegrateWebsiteModal } from './components/IntegrateWebsiteModal';
-import { TransformState, ModifiersState, Relationship, LoadedModel, GlyphObject, ObjectGeometrySettings, ExtrudeSettings, PrimitiveObject, PrimitiveType, OntologicalParameter, ConsoleLog, EditingRelation, ProjectState, SerializableLoadedModel, Oscillator, OntologicalSchema, Integration } from './types';
+import { AuthEndpointModal } from './components/AuthEndpointModal';
+import { TransformState, ModifiersState, Relationship, LoadedModel, GlyphObject, ObjectGeometrySettings, ExtrudeSettings, PrimitiveObject, PrimitiveType, OntologicalParameter, ConsoleLog, EditingRelation, ProjectState, SerializableLoadedModel, Oscillator, OntologicalSchema, Integration, TextureInfo, PaintToolState } from './types';
 import { Toolbar } from './components/Toolbar';
 import { createSystem, Concept } from './system/systemFactory';
 import { backendService } from './services/backendService';
 import { arrayBufferToBase64, base64ToArrayBuffer } from './utils/bufferUtils';
 import { getDisplayName } from './utils/getDisplayName';
-import { getNestedProperty } from './utils/propertyUtils';
+import { getNestedProperty, setNestedProperty } from './utils/propertyUtils';
 import { readGlb, writeGlb } from './utils/glbSchemaParser';
+import { TabbedPanel } from './components/TabbedPanel';
+import { AssetsPanel } from './panels/AssetsPanel';
 
 
 const DEFAULT_EXTRUDE_SETTINGS: ExtrudeSettings = { depth: 8, bevelThickness: 1, bevelSize: 0.5 };
@@ -85,7 +89,7 @@ const INITIAL_INTEGRATIONS: Integration[] = [
     { title: "MyOS 3D Data Visualizer", url: "https://data-vis-eosin.vercel.app/" },
     { title: "MyOS 3D File Explorer", url: "https://3-d-file-explorer.vercel.app/" },
     { title: "MyOS 3D Hyperlink Browser", url: "https://hyper-aether-pilgrim.vercel.app/" },
-    { title: "MyOS 3D Atom-Visualizer", url: "https://3d-molecule-lab.vercel.app/" },
+    { title: "MyOS 3D Atom-Visualizer", url: "https://atom-vis.vercel.app/" },
     { title: "MyOS 3D Nexus Page Editor", url: "https://nexus-page-editor.vercel.app/" },
     { title: "MyOS 3D IDE", url: "https://my-os-3-d-ide.vercel.app/" },
     { title: "Zak's Notepad", url: "https://zakdegarmo.github.io/ZaksNotepad/index.html" },
@@ -117,6 +121,12 @@ export const App: React.FC = () => {
   const [objectParameters, setObjectParameters] = useState<Record<string, any>>({});
   const [ontologicalParameters, setOntologicalParameters] = useState<Record<string, OntologicalParameter[]>>({});
   const [objectOscillators, setObjectOscillators] = useState<Record<string, Oscillator[]>>({});
+  const [objectTextureAssignments, setObjectTextureAssignments] = useState<Record<string, string>>({});
+  const [objectPaintedTextures, setObjectPaintedTextures] = useState<Record<string, string>>({}); // objId -> dataUrl
+  
+  // Asset Management State
+  const [textures, setTextures] = useState<Record<string, { name: string; texture: THREE.Texture; dataUrl: string }>>({});
+  const [paintedTextures, setPaintedTextures] = useState<Record<string, THREE.CanvasTexture>>({}); // objId -> texture
   
   // Scene-wide state
   const [selectedObjectKeys, setSelectedObjectKeys] = useState<string[]>([]);
@@ -129,8 +139,10 @@ export const App: React.FC = () => {
   const [isGlyphSelectorOpen, setIsGlyphSelectorOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isIntegrateModalOpen, setIsIntegrateModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [integrations, setIntegrations] = useState<Integration[]>(INITIAL_INTEGRATIONS);
   const [activeIntegrationUrl, setActiveIntegrationUrl] = useState<string>(INITIAL_INTEGRATIONS[0]?.url || '');
+  const [paintToolState, setPaintToolState] = useState<PaintToolState>({ enabled: false, color: '#ff0000', size: 10, opacity: 1 });
 
   // Ontological System State
   const [myos, setMyos] = useState<Record<string, Concept>>({});
@@ -148,10 +160,8 @@ export const App: React.FC = () => {
   const [isDirty, setIsDirty] = useState<boolean>(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const importProjectInputRef = useRef<HTMLInputElement>(null);
-  const importOntologyInputRef = useRef<HTMLInputElement>(null);
-  const analysisLogIdRef = useRef<number | null>(null);
 
-  const { generateSingleGlyph, isLoading: isFontProcessing, fontLoaded, isFontLoading, loadFont, availableGlyphs } = useGlyphGenerator();
+  const { generateSingleGlyph, isLoading: isFontProcessing, fontLoaded, isFontLoading, loadFont, availableGlyphs, error: fontError } = useGlyphGenerator();
   
   const viewerRef = useRef<Viewer3DHandle>(null);
 
@@ -188,6 +198,18 @@ export const App: React.FC = () => {
       setIntegrations(updater);
       setIsDirty(true);
   }, []);
+  const updateTextures = useCallback((updater: React.SetStateAction<Record<string, { name: string; texture: THREE.Texture; dataUrl: string }>>) => {
+      setTextures(updater);
+      setIsDirty(true);
+  }, []);
+  const updateObjectTextureAssignments = useCallback((updater: React.SetStateAction<Record<string, string>>) => {
+      setObjectTextureAssignments(updater);
+      setIsDirty(true);
+  }, []);
+    const updateObjectPaintedTextures = useCallback((updater: React.SetStateAction<Record<string, string>>) => {
+      setObjectPaintedTextures(updater);
+      setIsDirty(true);
+  }, []);
 
   const logToIDE = useCallback((text: string, type: ConsoleLog['type']) => {
     // Echo to browser console
@@ -211,14 +233,14 @@ export const App: React.FC = () => {
     // Update UI console state
     setConsoleLogs(prev => [...prev, { id: Date.now() + Math.random(), text, type }]);
   }, []);
+  
+  // Effect to report font loading errors to the user via the IDE console
+  useEffect(() => {
+    if (fontError) {
+        logToIDE(`Font loading error: ${fontError}`, 'error');
+    }
+  }, [fontError, logToIDE]);
 
-    useEffect(() => {
-        if (selectedObjectKeys.length === 1) {
-            const key = selectedObjectKeys[0];
-        } else {
-            //
-        }
-    }, [selectedObjectKeys, loadedModels, objectParameters, objectSettings]);
 
   useEffect(() => {
     // --- MyOS System Initialization ---
@@ -264,6 +286,264 @@ export const App: React.FC = () => {
     objectParameters, objectTransforms, objectModifiers, objectSettings,
     updateObjectParameters, updateObjectTransforms, logToIDE, customScripts, ontologicalMatrix
   ]);
+
+  // --- PROJECT LIFECYCLE ---
+  const getProjectState = useCallback((): ProjectState => {
+    const serializableModels: SerializableLoadedModel[] = loadedModels.map(model => ({
+      id: model.id,
+      filename: model.filename,
+      identity: model.identity,
+      originalBuffer: model.originalBuffer ? arrayBufferToBase64(model.originalBuffer) : '',
+    }));
+    
+    const serializableTextures: TextureInfo[] = Object.entries(textures).map(([id, textureData]) => ({
+      id,
+      name: textureData.name,
+      dataUrl: textureData.dataUrl,
+    }));
+    
+    return {
+      glyphObjects, loadedModels: serializableModels, primitiveObjects,
+      objectTransforms, objectModifiers, objectSettings, objectParameters,
+      objectOscillators, ontologicalParameters, relationships, customScripts,
+      ontologicalMatrix, integrations,
+      textures: serializableTextures, objectTextureAssignments, objectPaintedTextures,
+    };
+  }, [
+      glyphObjects, loadedModels, primitiveObjects, objectTransforms, objectModifiers,
+      objectSettings, objectParameters, objectOscillators, ontologicalParameters,
+      relationships, customScripts, ontologicalMatrix, integrations, textures,
+      objectTextureAssignments, objectPaintedTextures
+  ]);
+  
+  const loadProjectState = useCallback((state: ProjectState) => {
+    setIsProcessing(true);
+    logToIDE('Loading project state...', 'info');
+    return new Promise<void>((resolve, reject) => {
+        try {
+            setGlyphObjects(state.glyphObjects || []);
+            setPrimitiveObjects(state.primitiveObjects || []);
+            setObjectTransforms(state.objectTransforms || {});
+            setObjectModifiers(state.objectModifiers || {});
+            setObjectSettings(state.objectSettings || {});
+            setObjectParameters(state.objectParameters || {});
+            setObjectOscillators(state.objectOscillators || {});
+            setOntologicalParameters(state.ontologicalParameters || {});
+            setRelationships(state.relationships || []);
+            setCustomScripts(state.customScripts || {});
+            setOntologicalMatrix(state.ontologicalMatrix || INITIAL_RELATIONSHIP_MATRIX);
+            setObjectTextureAssignments(state.objectTextureAssignments || {});
+            setObjectPaintedTextures(state.objectPaintedTextures || {});
+
+            const loadedIntegrations = state.integrations && state.integrations.length > 0 ? state.integrations : INITIAL_INTEGRATIONS;
+            setIntegrations(loadedIntegrations);
+            setActiveIntegrationUrl(loadedIntegrations.find(i => i.url === './data_crucible.html')?.url || loadedIntegrations[0]?.url || '');
+            setSelectedObjectKeys([]);
+
+            const modelPromises = (state.loadedModels || []).map(serialModel => {
+                return new Promise<LoadedModel>((resolveModel, rejectModel) => {
+                    const buffer = base64ToArrayBuffer(serialModel.originalBuffer);
+                    new GLTFLoader().parse(
+                        buffer.slice(0), '',
+                        (gltf) => resolveModel({
+                            id: serialModel.id, filename: serialModel.filename, identity: serialModel.identity,
+                            scene: gltf.scene, gltfJson: gltf.parser.json, originalBuffer: buffer,
+                        }),
+                        (error) => {
+                            logToIDE(`Failed to parse model ${serialModel.filename}: ${error.message}`, 'error');
+                            rejectModel(error);
+                        }
+                    );
+                });
+            });
+
+            const texturePromises = (state.textures || []).map(texInfo => {
+                return new Promise<{ id: string; name: string; texture: THREE.Texture; dataUrl: string }>((resolveTex, rejectTex) => {
+                    new THREE.TextureLoader().load(
+                        texInfo.dataUrl,
+                        (texture) => resolveTex({ ...texInfo, texture }),
+                        undefined,
+                        (err) => {
+                             logToIDE(`Failed to load texture ${texInfo.name}: ${err}`, 'error');
+                             rejectTex(err);
+                        }
+                    );
+                });
+            });
+
+            const paintedTexturePromises = Object.entries(state.objectPaintedTextures || {}).map(([objId, dataUrl]) => {
+                return new Promise<{ objId: string; texture: THREE.CanvasTexture }>((resolvePaint, rejectPaint) => {
+                    const image = new Image();
+                    image.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = image.width;
+                        canvas.height = image.height;
+                        const ctx = canvas.getContext('2d');
+                        if (ctx) ctx.drawImage(image, 0, 0);
+                        resolvePaint({ objId, texture: new THREE.CanvasTexture(canvas) });
+                    };
+                    image.onerror = rejectPaint;
+                    image.src = dataUrl;
+                });
+            });
+
+            Promise.all([Promise.all(modelPromises), Promise.all(texturePromises), Promise.all(paintedTexturePromises)])
+            .then(([rehydratedModels, rehydratedTextures, rehydratedPainted]) => {
+                setLoadedModels(rehydratedModels);
+                setTextures(rehydratedTextures.reduce((acc, tex) => {
+                    acc[tex.id] = tex;
+                    return acc;
+                }, {} as Record<string, { name: string; texture: THREE.Texture; dataUrl: string }>));
+                setPaintedTextures(rehydratedPainted.reduce((acc, painted) => {
+                    acc[painted.objId] = painted.texture;
+                    return acc;
+                }, {} as Record<string, THREE.CanvasTexture>));
+                logToIDE('Project state loaded successfully.', 'success');
+                setIsDirty(false);
+                resolve();
+            }).catch(err => {
+                logToIDE(`Error rehydrating assets: ${err.message || err}`, 'error');
+                reject(err);
+            }).finally(() => setIsProcessing(false));
+
+        } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logToIDE(`Failed to load project state: ${message}`, 'error');
+            setIsProcessing(false);
+            reject(e);
+        }
+    });
+  }, [logToIDE]);
+
+  const handleExportProject = useCallback(() => {
+    try {
+        logToIDE(`Preparing project for local download...`, 'info');
+        const state = getProjectState();
+        const stateString = JSON.stringify(state, null, 2);
+        const blob = new Blob([stateString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const projectId = currentProjectId || 'myos-project';
+        a.download = `${projectId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        logToIDE('Project downloaded successfully as JSON.', 'success');
+        setIsDirty(false);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        logToIDE(`Failed to download project: ${message}`, 'error');
+    }
+  }, [getProjectState, logToIDE, currentProjectId]);
+  
+  const handleSaveProject = useCallback(() => {
+    logToIDE('Saving project by exporting to a local JSON file...', 'info');
+    handleExportProject();
+  }, [handleExportProject]);
+
+  const handleImportProject = useCallback(() => {
+    if (isDirty && !window.confirm("You have unsaved changes that will be lost. Continue?")) {
+        return;
+    }
+    importProjectInputRef.current?.click();
+  }, [isDirty]);
+
+  const handleImportProjectFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.name.endsWith('.zip')) {
+        logToIDE('ZIP project import requires a backend. Please import the project state .json file directly.', 'error');
+        if(event.target) event.target.value = '';
+        return;
+    }
+
+    try {
+        setIsProcessing(true);
+        logToIDE(`Importing project from ${file.name}...`, 'info');
+        
+        const fileContent = await file.text();
+        const state = JSON.parse(fileContent) as ProjectState;
+        
+        await loadProjectState(state);
+        
+        const newProjectId = `local-${file.name.split('.')[0]}-${Date.now()}`;
+        setCurrentProjectId(newProjectId);
+        logToIDE(`Project loaded. New local session ID: ${newProjectId}.`, 'info');
+        
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logToIDE(`Failed to import project file: ${message}`, 'error');
+    } finally {
+        setIsProcessing(false);
+        if(event.target) event.target.value = ''; // Reset input
+    }
+  }, [loadProjectState, logToIDE]);
+
+  const handleNewProject = useCallback(() => {
+    if (isDirty && !window.confirm("You have unsaved changes. Are you sure you want to start a new project?")) {
+        return;
+    }
+    
+    setIsProcessing(true);
+    
+    // Generate a client-side project ID
+    const projectId = `local-proj-${Date.now()}`; 
+    setCurrentProjectId(projectId);
+
+    // Reset all state
+    setGlyphObjects([]); 
+    setLoadedModels([]); 
+    setPrimitiveObjects([]);
+    setObjectTransforms({}); 
+    setObjectModifiers({}); 
+    setObjectSettings({});
+    setObjectParameters({}); 
+    setObjectOscillators({}); 
+    setOntologicalParameters({});
+    setRelationships([]); 
+    setCustomScripts({}); 
+    setOntologicalMatrix(INITIAL_RELATIONSHIP_MATRIX);
+    setIntegrations(INITIAL_INTEGRATIONS); 
+    setActiveIntegrationUrl(INITIAL_INTEGRATIONS[0]?.url || '');
+    setSelectedObjectKeys([]); 
+    setConsoleLogs([]);
+    setTextures({});
+    setObjectTextureAssignments({});
+    setPaintedTextures({});
+    setObjectPaintedTextures({});
+    
+    setIsDirty(false);
+    logToIDE(`New local project started. ID: ${projectId}`, 'system');
+    
+    setIsProcessing(false);
+  }, [isDirty, logToIDE]);
+  
+  // Create an initial project when the app loads
+  useEffect(() => {
+    handleNewProject();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleExportOntology = useCallback(() => {
+    try {
+      const schema: Omit<OntologicalSchema, 'mooseVersion'> = { relationshipMatrix: ontologicalMatrix, customScripts };
+      const buffer = writeGlb(schema);
+      const blob = new Blob([buffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `myos-ontology-${Date.now()}.glb`;
+      a.click();
+      URL.revokeObjectURL(url);
+      logToIDE('Ontology exported to GLB file.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logToIDE(`Failed to export ontology: ${message}`, 'error');
+    }
+  }, [ontologicalMatrix, customScripts, logToIDE]);
 
   const handleOscillateCommand = useCallback((args: string[], targetKey: string) => {
     if (args.length < 3) {
@@ -352,6 +632,10 @@ export const App: React.FC = () => {
         logToIDE('No active project. Cannot execute bun command.', 'error');
         return;
     }
+    if (currentProjectId.startsWith('local-')) {
+        logToIDE('Bun commands require a server-based project workspace. This is a local session.', 'error');
+        return;
+    }
     logToIDE(`Executing in [${currentProjectId}]: ${command}`, 'system');
     backendService.executeBunCommand(command, currentProjectId, (data) => {
         let type: ConsoleLog['type'] = 'out';
@@ -414,9 +698,11 @@ export const App: React.FC = () => {
     if (executed) return;
     
     // --- AI Query Fallback ---
-    logToIDE(`Thinking...`, 'system');
-    analysisLogIdRef.current = null;
+    const newLogId = Date.now() + Math.random();
+    setConsoleLogs(prev => [...prev, { id: newLogId, text: '', type: 'ai', status: 'thinking' }]);
+
     let accumulatedText = '';
+    let isFirstChunk = true;
 
     backendService.aiQuery(command, (data) => {
         if (data.type === 'source') {
@@ -425,19 +711,29 @@ export const App: React.FC = () => {
         } else if (data.type === 'chunk') {
             accumulatedText += data.payload;
             setConsoleLogs(prev => {
-                if (analysisLogIdRef.current === null) {
-                    const newLogId = Date.now() + Math.random();
-                    analysisLogIdRef.current = newLogId;
-                    return [...prev, { id: newLogId, text: data.payload, type: 'ai' }];
-                }
-                return prev.map(log => log.id === analysisLogIdRef.current ? { ...log, text: accumulatedText } : log);
+                return prev.map(log => {
+                    if (log.id === newLogId) {
+                        const updatedLog: ConsoleLog = { ...log, text: accumulatedText };
+                        if (isFirstChunk) {
+                            delete updatedLog.status;
+                            isFirstChunk = false;
+                        }
+                        return updatedLog;
+                    }
+                    return log;
+                });
             });
         }
     }).catch(err => {
         const message = err instanceof Error ? err.message : String(err);
-        logToIDE(`AI Query Error: ${message}`, 'error');
+        setConsoleLogs(prev => prev.map(log => {
+            if (log.id === newLogId) {
+                return { id: log.id, text: `AI Query Error: ${message}`, type: 'error' };
+            }
+            return log;
+        }));
     });
-  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand, handleBunCommand]);
+  }, [logToIDE, selectedObjectKeys, myos, glyphObjects, loadedModels, primitiveObjects, handleOscillateCommand, handleStopOscillationCommand, handleBunCommand, handleExportProject]);
 
 
   const handleDeleteObject = useCallback((keyToDelete: string) => {
@@ -455,11 +751,19 @@ export const App: React.FC = () => {
     updateObjectSettings(updater);
     updateObjectParameters(updater);
     updateObjectOscillators(updater);
+    updateObjectTextureAssignments(updater);
+    updateObjectPaintedTextures(updater);
+
+    setPaintedTextures(prev => {
+        const next = {...prev};
+        delete next[keyToDelete];
+        return next;
+    });
     
     updateRelationships(prev => prev.filter(r => r.from !== keyToDelete && r.to !== keyToDelete));
     setSelectedObjectKeys(prev => prev.filter(k => k !== keyToDelete));
     setIsDirty(true);
-  }, [updateObjectTransforms, updateObjectModifiers, updateObjectSettings, updateObjectParameters, updateRelationships, updateObjectOscillators]);
+  }, [updateObjectModifiers, updateObjectOscillators, updateObjectParameters, updateObjectSettings, updateObjectTransforms, updateRelationships, updateObjectTextureAssignments, updateObjectPaintedTextures]);
 
 
   const handleAddPrimitive = useCallback((type: PrimitiveType) => {
@@ -506,45 +810,127 @@ export const App: React.FC = () => {
     }
   }, [generateSingleGlyph, updateObjectSettings, logToIDE]);
 
+  const handleCreateGlyphLibrary = useCallback(async () => {
+    if (!fontLoaded) {
+        logToIDE("No font loaded. Please load a font file first from the 'File' menu.", 'error');
+        return;
+    }
+    
+    setIsProcessing(true);
+    setProcessingError(null);
+    logToIDE(`Generating glyph library for ${availableGlyphs.length} characters... This may take a moment.`, 'info');
+    
+    try {
+        const newGlyphObjectsBatch: GlyphObject[] = [];
+        const newObjectSettingsBatch: Record<string, ObjectGeometrySettings> = {};
+        const newObjectTransformsBatch: Record<string, TransformState> = {};
+        
+        const gridCols = 10;
+        const spacing = 25;
+        let currentRow = 0;
+        let currentCol = 0;
 
-  const handleImportModel = useCallback((file: File) => {
+        for (const char of availableGlyphs) {
+            try {
+                const glyphData = await generateSingleGlyph(char);
+                const newId = `glyph-${char}-${Date.now()}`;
+                
+                newGlyphObjectsBatch.push({ id: newId, glyphData });
+                newObjectSettingsBatch[newId] = { extrude: DEFAULT_EXTRUDE_SETTINGS };
+
+                const x = (currentCol - (gridCols - 1) / 2) * spacing;
+                const y = 0;
+                const z = -currentRow * spacing;
+                newObjectTransformsBatch[newId] = { position: [x, y, z], rotation: [0, 0, 0, 1], scale: [1, 1, 1] };
+                
+                currentCol++;
+                if (currentCol >= gridCols) {
+                    currentCol = 0;
+                    currentRow++;
+                }
+            } catch (glyphError) {
+                logToIDE(`Could not generate glyph for '${char}'. Skipping.`, 'error');
+            }
+        }
+        
+        // Batch update state
+        setGlyphObjects(prev => [...prev, ...newGlyphObjectsBatch]);
+        updateObjectSettings(prev => ({ ...prev, ...newObjectSettingsBatch }));
+        updateObjectTransforms(prev => ({ ...prev, ...newObjectTransformsBatch }));
+        
+        logToIDE(`Successfully created a library with ${newGlyphObjectsBatch.length} glyph objects.`, 'success');
+        setIsDirty(true);
+        
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setProcessingError(message);
+        logToIDE(`Glyph library creation failed: ${message}`, 'error');
+    } finally {
+        setIsProcessing(false);
+    }
+  }, [fontLoaded, availableGlyphs, generateSingleGlyph, updateObjectSettings, updateObjectTransforms, logToIDE]);
+
+
+  const handleImportGlb = useCallback((file: File) => {
+    if (isDirty) {
+        if (!window.confirm("Importing a GLB file may overwrite parts of your project if it's a MOOSE ontology file. Unsaved changes may be lost. Continue?")) {
+            return;
+        }
+    }
+
     setIsProcessing(true);
     setProcessingError(null);
     const reader = new FileReader();
 
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const buffer = e.target?.result as ArrayBuffer;
             if (!buffer) throw new Error("File could not be read.");
-            
-            const loader = new GLTFLoader();
-            loader.parse(
-                buffer.slice(0), // Create a copy for parsing
-                '',
-                (gltf) => {
-                    const newId = `glb-model-${file.name.split('.')[0]}-${Date.now()}`;
-                    const model: LoadedModel = {
-                        id: newId,
-                        scene: gltf.scene,
-                        filename: file.name,
-                        identity: `Model from ${file.name}`,
-                        gltfJson: gltf.parser.json,
-                        originalBuffer: buffer
-                    };
-                    setLoadedModels(prev => [...prev, model]);
-                    setSelectedObjectKeys([newId]);
-                    setIsDirty(true);
-                    logToIDE(`Successfully loaded ${file.name}`, 'success');
-                    setIsProcessing(false);
-                },
-                (error) => {
-                    throw new Error(`GLTF parsing failed: ${error.message}`);
+
+            // Attempt to read as MOOSE ontology first
+            try {
+                const schema = await readGlb(buffer.slice(0)); // Use slice to get a fresh buffer
+                setOntologicalMatrix(schema.relationshipMatrix);
+                setCustomScripts(schema.customScripts || {});
+                setIsDirty(true);
+                logToIDE(`Successfully imported MOOSE ontology from ${file.name}`, 'success');
+            } catch (ontologyError) {
+                if (ontologyError instanceof Error && ontologyError.message.startsWith('Not a MOOSE')) {
+                    // This is expected for standard models, not a true error.
+                    logToIDE(`'${file.name}' is not a MOOSE ontology file. Loading as a 3D model.`, 'info');
+                    const loader = new GLTFLoader();
+                    loader.parse(
+                        buffer.slice(0),
+                        '',
+                        (gltf) => {
+                            const newId = `glb-model-${file.name.split('.')[0]}-${Date.now()}`;
+                            const model: LoadedModel = {
+                                id: newId,
+                                scene: gltf.scene,
+                                filename: file.name,
+                                identity: `Model from ${file.name}`,
+                                gltfJson: gltf.parser.json,
+                                originalBuffer: buffer
+                            };
+                            setLoadedModels(prev => [...prev, model]);
+                            setSelectedObjectKeys([newId]);
+                            setIsDirty(true);
+                            logToIDE(`Successfully loaded model ${file.name}`, 'success');
+                        },
+                        (gltfError) => {
+                            throw new Error(`GLTF parsing failed: ${gltfError.message}`);
+                        }
+                    );
+                } else {
+                    // It's a real error from readGlb (e.g., corrupted file)
+                    throw ontologyError;
                 }
-            );
+            }
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             setProcessingError(message);
-            logToIDE(message, 'error');
+            logToIDE(`Failed to import GLB file '${file.name}': ${message}`, 'error');
+        } finally {
             setIsProcessing(false);
         }
     };
@@ -555,7 +941,73 @@ export const App: React.FC = () => {
          setIsProcessing(false);
     };
     reader.readAsArrayBuffer(file);
-  }, [logToIDE]);
+  }, [logToIDE, isDirty]);
+
+  const handleImportTexture = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        if (!dataUrl) {
+            logToIDE(`Could not read texture file ${file.name}`, 'error');
+            return;
+        }
+        new THREE.TextureLoader().load(dataUrl, (texture) => {
+            const id = `texture-${Date.now()}`;
+            texture.needsUpdate = true;
+            updateTextures(prev => ({
+                ...prev,
+                [id]: { name: file.name, texture, dataUrl }
+            }));
+            logToIDE(`Texture '${file.name}' imported successfully.`, 'success');
+        });
+    };
+    reader.readAsDataURL(file);
+}, [logToIDE, updateTextures]);
+
+  const handleDeleteTexture = useCallback((textureId: string) => {
+    // Unassign from all objects first
+    updateObjectTextureAssignments(prev => {
+        const next = {...prev};
+        Object.entries(next).forEach(([objKey, texKey]) => {
+            if (texKey === textureId) {
+                delete next[objKey];
+            }
+        });
+        return next;
+    });
+    // Then delete the texture itself
+    updateTextures(prev => {
+        const next = {...prev};
+        delete next[textureId];
+        return next;
+    });
+  }, [updateObjectTextureAssignments, updateTextures]);
+
+  const handleAssignTexture = useCallback((objectKeys: string[], textureId: string | null) => {
+    updateObjectTextureAssignments(prev => {
+        const next = {...prev};
+        objectKeys.forEach(key => {
+            if (textureId === null) {
+                delete next[key];
+            } else {
+                next[key] = textureId;
+            }
+        });
+        return next;
+    });
+  }, [updateObjectTextureAssignments]);
+  
+  const handlePaintedTextureCreate = useCallback((objectKey: string, texture: THREE.CanvasTexture) => {
+    setPaintedTextures(prev => ({ ...prev, [objectKey]: texture }));
+    updateObjectPaintedTextures(prev => ({ ...prev, [objectKey]: texture.image.toDataURL() }));
+    setIsDirty(true);
+  }, [updateObjectPaintedTextures]);
+
+  const handlePaintedTextureUpdate = useCallback((objectKey: string, texture: THREE.CanvasTexture) => {
+    // Only update the dataURL for serialization, the texture object itself is managed in the viewer
+    updateObjectPaintedTextures(prev => ({ ...prev, [objectKey]: texture.image.toDataURL() }));
+    setIsDirty(true);
+  }, [updateObjectPaintedTextures]);
   
   const handleExecuteRelationship = useCallback(({ source, target, verb }: { source: string, target: string, verb: string }) => {
     if (selectedObjectKeys.length !== 1) {
@@ -587,41 +1039,76 @@ export const App: React.FC = () => {
     }
   }, [editingRelation, logToIDE]);
 
-  const handleUpdateObjectData = useCallback((key: string, newData: any) => {
-    if (key.startsWith('primitive-')) {
-        logToIDE(`Updating parameters for ${key}`, 'system');
-        updateObjectParameters(prev => ({...prev, [key]: newData}));
-    } else if (key.startsWith('glyph-')) {
-        logToIDE(`Updating settings for ${key}`, 'system');
-        updateObjectSettings(prev => ({...prev, [key]: { ...prev[key], extrude: newData }}));
-    } else if (key.startsWith('glb-model-')) {
-        logToIDE("Directly editing GLTF model data is not yet supported.", 'info');
-    }
-  }, [updateObjectParameters, updateObjectSettings, logToIDE]);
+  const handleUpdateObjectProperty = useCallback((key: string, path: string, value: any) => {
+      const rootProperty = path.split('.')[0];
+      const pathWithoutRoot = path.substring(path.indexOf('.') + 1);
+
+      switch (rootProperty) {
+          case 'transform':
+              updateObjectTransforms(prev => {
+                  const current = prev[key] || {};
+                  return { ...prev, [key]: setNestedProperty(current, pathWithoutRoot, value) };
+              });
+              break;
+          case 'modifiers':
+              updateObjectModifiers(prev => {
+                  const current = prev[key] || {};
+                  return { ...prev, [key]: setNestedProperty(current, pathWithoutRoot, value) };
+              });
+              break;
+          case 'parameters':
+              if (key.startsWith('primitive-')) {
+                  updateObjectParameters(prev => {
+                      const current = prev[key] || {};
+                      return { ...prev, [key]: setNestedProperty(current, pathWithoutRoot, value) };
+                  });
+              }
+              break;
+          case 'settings':
+              if (key.startsWith('glyph-')) {
+                  updateObjectSettings(prev => {
+                      const current = prev[key] || {};
+                      return { ...prev, [key]: setNestedProperty(current, pathWithoutRoot, value) };
+                  });
+              }
+              break;
+      }
+  }, [updateObjectTransforms, updateObjectModifiers, updateObjectParameters, updateObjectSettings]);
 
   const handleAnalyzeCode = useCallback((code: string) => {
-    logToIDE(`Analyzing code snippet...`, 'system');
-    const analysisLog = analysisLogIdRef;
-    analysisLog.current = null;
+    const newLogId = Date.now() + Math.random();
+    setConsoleLogs(prev => [...prev, { id: newLogId, text: '', type: 'ai', status: 'thinking' }]);
+
     let accumulatedText = '';
+    let isFirstChunk = true;
 
     backendService.analyzeCode(code, (data) => {
         if (data.type === 'chunk') {
             accumulatedText += data.payload;
             setConsoleLogs(prev => {
-                if (analysisLog.current === null) {
-                    const newLogId = Date.now() + Math.random();
-                    analysisLog.current = newLogId;
-                    return [...prev, { id: newLogId, text: data.payload, type: 'ai' }];
-                }
-                return prev.map(log => log.id === analysisLog.current ? { ...log, text: accumulatedText } : log);
+                return prev.map(log => {
+                    if (log.id === newLogId) {
+                        const updatedLog: ConsoleLog = { ...log, text: accumulatedText };
+                        if (isFirstChunk) {
+                            delete updatedLog.status;
+                            isFirstChunk = false;
+                        }
+                        return updatedLog;
+                    }
+                    return log;
+                });
             });
         }
     }).catch(err => {
         const message = err instanceof Error ? err.message : String(err);
-        logToIDE(`Code Analysis Error: ${message}`, 'error');
+        setConsoleLogs(prev => prev.map(log => {
+            if (log.id === newLogId) {
+                return { id: log.id, text: `Code Analysis Error: ${message}`, type: 'error' };
+            }
+            return log;
+        }));
     });
-  }, [logToIDE]);
+  }, []);
 
   const handleAddIntegration = useCallback(({ title, url }: Integration) => {
     const newIntegration = { title, url };
@@ -637,249 +1124,12 @@ export const App: React.FC = () => {
     logToIDE(`Added new integration: ${title}`, 'success');
   }, [updateIntegrations, logToIDE]);
 
-  // --- PROJECT LIFECYCLE ---
-  const getProjectState = useCallback((): ProjectState => {
-    const serializableModels: SerializableLoadedModel[] = loadedModels.map(model => ({
-      id: model.id,
-      filename: model.filename,
-      identity: model.identity,
-      originalBuffer: model.originalBuffer ? arrayBufferToBase64(model.originalBuffer) : '',
-    }));
-    
-    return {
-      glyphObjects, loadedModels: serializableModels, primitiveObjects,
-      objectTransforms, objectModifiers, objectSettings, objectParameters,
-      objectOscillators, ontologicalParameters, relationships, customScripts,
-      ontologicalMatrix, integrations,
-    };
-  }, [
-      glyphObjects, loadedModels, primitiveObjects, objectTransforms, objectModifiers,
-      objectSettings, objectParameters, objectOscillators, ontologicalParameters,
-      relationships, customScripts, ontologicalMatrix, integrations
-  ]);
-  
-  const loadProjectState = useCallback((state: ProjectState) => {
-    setIsProcessing(true);
-    logToIDE('Loading project state...', 'info');
-    return new Promise<void>((resolve, reject) => {
-        try {
-            setGlyphObjects(state.glyphObjects || []);
-            setPrimitiveObjects(state.primitiveObjects || []);
-            setObjectTransforms(state.objectTransforms || {});
-            setObjectModifiers(state.objectModifiers || {});
-            setObjectSettings(state.objectSettings || {});
-            setObjectParameters(state.objectParameters || {});
-            setObjectOscillators(state.objectOscillators || {});
-            setOntologicalParameters(state.ontologicalParameters || {});
-            setRelationships(state.relationships || []);
-            setCustomScripts(state.customScripts || {});
-            setOntologicalMatrix(state.ontologicalMatrix || INITIAL_RELATIONSHIP_MATRIX);
-            const loadedIntegrations = state.integrations && state.integrations.length > 0 ? state.integrations : INITIAL_INTEGRATIONS;
-            setIntegrations(loadedIntegrations);
-            setActiveIntegrationUrl(loadedIntegrations[0]?.url || '');
-            setSelectedObjectKeys([]);
-
-            const rehydratedModels: LoadedModel[] = [];
-            const loader = new GLTFLoader();
-            const promises = (state.loadedModels || []).map(serialModel => {
-                return new Promise<void>((resolveModel, rejectModel) => {
-                    const buffer = base64ToArrayBuffer(serialModel.originalBuffer);
-                    loader.parse(
-                        buffer.slice(0), '',
-                        (gltf) => {
-                            rehydratedModels.push({
-                                id: serialModel.id, filename: serialModel.filename, identity: serialModel.identity,
-                                scene: gltf.scene, gltfJson: gltf.parser.json, originalBuffer: buffer,
-                            });
-                            resolveModel();
-                        },
-                        (error) => {
-                            logToIDE(`Failed to parse model ${serialModel.filename}: ${error.message}`, 'error');
-                            rejectModel(error);
-                        }
-                    );
-                });
-            });
-
-            Promise.all(promises).then(() => {
-                setLoadedModels(rehydratedModels);
-                logToIDE('Project state loaded successfully.', 'success');
-                setIsDirty(false);
-                setIsProcessing(false);
-                resolve();
-            }).catch(err => {
-                logToIDE(`Error rehydrating models: ${err.message}`, 'error');
-                setIsProcessing(false);
-                reject(err);
-            });
-
-        } catch (e) {
-            const message = e instanceof Error ? e.message : String(e);
-            logToIDE(`Failed to load project state: ${message}`, 'error');
-            setIsProcessing(false);
-            reject(e);
-        }
-    });
-  }, [logToIDE]);
-
-  const handleNewProject = useCallback(async () => {
-    if (isDirty && !window.confirm("You have unsaved changes. Are you sure you want to start a new project?")) {
-        return;
-    }
-    try {
-        setIsProcessing(true);
-        const { projectId } = await backendService.createNewWorkspace();
-        setCurrentProjectId(projectId);
-
-        setGlyphObjects([]); setLoadedModels([]); setPrimitiveObjects([]);
-        setObjectTransforms({}); setObjectModifiers({}); setObjectSettings({});
-        setObjectParameters({}); setObjectOscillators({}); setOntologicalParameters({});
-        setRelationships([]); setCustomScripts({}); setOntologicalMatrix(INITIAL_RELATIONSHIP_MATRIX);
-        setIntegrations(INITIAL_INTEGRATIONS); setActiveIntegrationUrl(INITIAL_INTEGRATIONS[0]?.url || '');
-        setSelectedObjectKeys([]); setConsoleLogs([]);
-        
-        setIsDirty(false);
-        logToIDE(`New project started with ID: ${projectId}`, 'system');
-    } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Error creating new project: ${message}`, 'error');
-    } finally {
-        setIsProcessing(false);
-    }
-  }, [isDirty, logToIDE]);
-  
-  // Create an initial project when the app loads
-  useEffect(() => {
-    handleNewProject();
-  }, []);
-
-  const handleSaveProject = useCallback(async () => {
-    if (!currentProjectId) {
-        logToIDE('No active project to save.', 'error');
-        return;
-    }
-    try {
-        const state = getProjectState();
-        await backendService.saveProjectState(currentProjectId, state);
-        setIsDirty(false);
-        logToIDE(`Project ${currentProjectId} saved.`, 'success');
-    } catch(e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Error saving project: ${message}`, 'error');
-    }
-  }, [currentProjectId, getProjectState, logToIDE]);
-
-  const handleExportProject = useCallback(async () => {
-    if (!currentProjectId) {
-        logToIDE('No active project to download.', 'error');
-        return;
-    }
-    try {
-        logToIDE(`Preparing project ${currentProjectId} for download...`, 'info');
-        // First, save the current state to ensure the archive is up-to-date
-        await handleSaveProject();
-
-        const blob = await backendService.downloadProject(currentProjectId);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${currentProjectId}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-        logToIDE('Project downloaded successfully.', 'success');
-    } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        logToIDE(`Failed to download project: ${message}`, 'error');
-    }
-  }, [currentProjectId, handleSaveProject, logToIDE]);
-
-  const handleImportProject = useCallback(() => {
-    if (isDirty && !window.confirm("You have unsaved changes that will be lost. Continue?")) {
-        return;
-    }
-    importProjectInputRef.current?.click();
-  }, [isDirty]);
-
-  const handleImportProjectFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-        setIsProcessing(true);
-        logToIDE(`Uploading project ${file.name}...`, 'info');
-        const { projectId: newProjectId } = await backendService.uploadProject(file);
-        logToIDE(`Project uploaded. New ID: ${newProjectId}. Loading state...`, 'info');
-        
-        const state = await backendService.loadProjectState(newProjectId);
-        await loadProjectState(state);
-        setCurrentProjectId(newProjectId);
-        
-    } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logToIDE(`Failed to import project: ${message}`, 'error');
-    } finally {
-        setIsProcessing(false);
-        if(event.target) event.target.value = ''; // Reset input
-    }
-  }, [loadProjectState, logToIDE]);
-
-  const handleExportOntology = useCallback(() => {
-    try {
-      const schema: OntologicalSchema = { relationshipMatrix: ontologicalMatrix, customScripts };
-      const buffer = writeGlb(schema);
-      const blob = new Blob([buffer], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `myos-ontology-${Date.now()}.glb`;
-      a.click();
-      URL.revokeObjectURL(url);
-      logToIDE('Ontology exported to GLB file.', 'success');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logToIDE(`Failed to export ontology: ${message}`, 'error');
-    }
-  }, [ontologicalMatrix, customScripts, logToIDE]);
-
-  const handleImportOntology = useCallback(() => {
-    if (isDirty && !window.confirm("This will overwrite your current ontology rules and custom functions. Continue?")) {
-        return;
-    }
-    importOntologyInputRef.current?.click();
-  }, [isDirty]);
-  
-  const handleImportOntologyFile = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const buffer = e.target?.result as ArrayBuffer;
-        if (!buffer) throw new Error("Could not read file buffer.");
-        
-        const schema = await readGlb(buffer);
-        setOntologicalMatrix(schema.relationshipMatrix);
-        setCustomScripts(schema.customScripts || {});
-        setIsDirty(true);
-        logToIDE(`Successfully imported ontology from ${file.name}`, 'success');
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logToIDE(`Failed to import ontology file: ${message}`, 'error');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    if (event.target) event.target.value = ''; // Reset input
-  }, [logToIDE]);
-
-
   return (
     <div className="h-screen w-screen bg-bg-light text-base-100 flex flex-col font-sans">
       <header className="flex-shrink-0 bg-bg-dark h-12 flex items-center justify-between px-4 border-b border-gray-700/50 shadow-md">
         <div className="flex items-center space-x-4">
           <div className="font-bold text-lg text-brand-secondary">MyOS IDE</div>
           <Toolbar
-            onImportModel={handleImportModel}
             onLoadFont={loadFont}
             onCreateFromGlyph={() => setIsGlyphSelectorOpen(true)}
             isFontLoaded={fontLoaded}
@@ -888,10 +1138,11 @@ export const App: React.FC = () => {
             onSaveProject={handleSaveProject}
             onImportProject={handleImportProject}
             onExportProject={handleExportProject}
-            onImportOntology={handleImportOntology}
             onExportOntology={handleExportOntology}
             onCreatePrimitive={() => setIsCreateModalOpen(true)}
             onIntegrateWebsite={() => setIsIntegrateModalOpen(true)}
+            onCreateGlyphLibrary={handleCreateGlyphLibrary}
+            onConfigureAuth={() => setIsAuthModalOpen(true)}
           />
         </div>
         <div className="flex items-center space-x-2 text-xs">
@@ -907,8 +1158,8 @@ export const App: React.FC = () => {
             <Panel defaultSize={70} minSize={30}>
                 <PanelGroup direction="horizontal">
                     <Panel defaultSize={18} minSize={15} className="bg-bg-light flex flex-col">
-                        <PanelGroup direction="vertical">
-                            <Panel defaultSize={50} minSize={25}>
+                        <TabbedPanel tabs={[
+                            { title: 'Hierarchy', content: (
                                 <HierarchyPanel
                                     glyphObjects={glyphObjects}
                                     loadedModels={loadedModels}
@@ -916,15 +1167,22 @@ export const App: React.FC = () => {
                                     selectedObjectKeys={selectedObjectKeys}
                                     setSelectedObjectKeys={setSelectedObjectKeys}
                                     onDeleteObject={handleDeleteObject}
-                                    onUpdateObjectData={handleUpdateObjectData}
+                                    onUpdateObjectProperty={handleUpdateObjectProperty}
                                     objectParameters={objectParameters}
                                     objectSettings={objectSettings}
                                     objectModifiers={objectModifiers}
                                     objectTransforms={objectTransforms}
                                 />
-                            </Panel>
-                            <PanelResizeHandle className="h-1 bg-bg-dark hover:bg-brand-primary transition-colors" />
-                            <Panel defaultSize={50} minSize={25}>
+                            )},
+                            { title: 'Assets', content: (
+                                <AssetsPanel 
+                                    textures={textures}
+                                    onImportTexture={handleImportTexture}
+                                    onDeleteTexture={handleDeleteTexture}
+                                    onImportModel={handleImportGlb}
+                                />
+                            )},
+                            { title: 'Ontology', content: (
                                 <OntologyMatrixPanel
                                     relationshipMatrix={ontologicalMatrix}
                                     onExecuteRelationship={handleExecuteRelationship}
@@ -933,8 +1191,8 @@ export const App: React.FC = () => {
                                     focusedConcept={focusedConcept}
                                     setFocusedConcept={setFocusedConcept}
                                 />
-                            </Panel>
-                        </PanelGroup>
+                            )},
+                        ]}/>
                     </Panel>
                     <PanelResizeHandle className="w-1 bg-bg-dark hover:bg-brand-primary transition-colors" />
                     <Panel defaultSize={52} minSize={30}>
@@ -958,6 +1216,13 @@ export const App: React.FC = () => {
                           relationships={relationships}
                           onDeleteObject={handleDeleteObject}
                           logToIDE={logToIDE}
+                          paintToolState={paintToolState}
+                          setPaintToolState={setPaintToolState}
+                          textures={textures}
+                          objectTextureAssignments={objectTextureAssignments}
+                          paintedTextures={paintedTextures}
+                          onPaintedTextureCreate={handlePaintedTextureCreate}
+                          onPaintedTextureUpdate={handlePaintedTextureUpdate}
                         />
                     </Panel>
                     <PanelResizeHandle className="w-1 bg-bg-dark hover:bg-brand-primary transition-colors" />
@@ -978,6 +1243,11 @@ export const App: React.FC = () => {
                             relationships={relationships}
                             setRelationships={updateRelationships}
                             isLoading={isProcessing || isFontProcessing}
+                            textures={textures}
+                            objectTextureAssignments={objectTextureAssignments}
+                            onAssignTexture={handleAssignTexture}
+                            paintToolState={paintToolState}
+                            setPaintToolState={setPaintToolState}
                         />
                     </Panel>
                 </PanelGroup>
@@ -1024,23 +1294,19 @@ export const App: React.FC = () => {
         onClose={() => setIsIntegrateModalOpen(false)}
         onAdd={handleAddIntegration}
       />
+      <AuthEndpointModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        logToIDE={logToIDE}
+      />
       <input
         type="file"
         ref={importProjectInputRef}
         onChange={handleImportProjectFile}
-        accept=".zip"
+        accept=".json"
         style={{ display: 'none' }}
         aria-hidden="true"
       />
-       <input
-        type="file"
-        ref={importOntologyInputRef}
-        onChange={handleImportOntologyFile}
-        accept=".glb"
-        style={{ display: 'none' }}
-        aria-hidden="true"
-      />
-
     </div>
   );
 };

@@ -1,5 +1,5 @@
-/// <reference types="@react-three/fiber" />
-{/* FIX: Removed redundant `import '@react-three/fiber';`. The triple-slash directive is sufficient for type augmentation. */}
+// FIX: Removed the triple-slash directive and comment that were causing type resolution issues.
+// The standard import of `Canvas` from '@react-three/fiber' is sufficient to augment JSX types.
 import React, { Suspense, useMemo, useEffect, useRef, useState, useCallback, useLayoutEffect, useImperativeHandle } from 'react';
 import { Canvas, useThree, useFrame, ThreeEvent } from '@react-three/fiber';
 import { TrackballControls, Center, Environment, PointerLockControls, Line, useHelper, Edges } from '@react-three/drei';
@@ -8,7 +8,8 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three-stdlib';
 import { CrosshairIcon, OrbitIcon, ResetCameraIcon, ZoomInIcon, ZoomOutIcon } from './icons';
 import { ExtrusionAnimator } from './ExtrusionAnimator';
-import type { TransformState, ModifiersState, Relationship, LoadedModel, GlyphObject, ObjectGeometrySettings, GlyphData, PrimitiveObject, OntologicalParameter, ConsoleLog, Oscillator } from '../types';
+// FIX: Added PaintToolState to the type imports to support paint functionality.
+import type { TransformState, ModifiersState, Relationship, LoadedModel, GlyphObject, ObjectGeometrySettings, GlyphData, PrimitiveObject, OntologicalParameter, ConsoleLog, Oscillator, PaintToolState } from '../types';
 import { ColorPalette } from './ColorPalette';
 import { applyBend, applyTaper, applyTwist } from './geometryModifiers';
 import { getDisplayName } from '../utils/getDisplayName';
@@ -280,29 +281,29 @@ const AnimationController: React.FC<{
         const activeOscillators = Object.entries(objectOscillators).filter(([, oscs]) => oscs?.some(o => o.enabled));
         if (activeOscillators.length === 0) return;
         
-        const updates: Record<string, ModifiersState> = {};
+        let updates: Record<string, ModifiersState> | null = null;
         const elapsedTime = clock.getElapsedTime();
 
         for (const [key, oscillators] of activeOscillators) {
+            let currentModifiers = objectModifiers[key] || {};
             let needsUpdate = false;
-            // Start with a clone of the current modifiers for this object
-            const newModifiers = JSON.parse(JSON.stringify(objectModifiers[key] || {}));
-
+            
             for (const osc of oscillators) {
-                if (osc.enabled) {
+                if (osc.enabled && osc.property.startsWith('modifiers.')) {
                     const value = osc.baseValue + Math.sin(elapsedTime * osc.frequency + osc.offset) * osc.amplitude;
-                    // setNestedProperty immutably sets the value and returns the new top-level object
-                    const updatedModifiers = setNestedProperty(newModifiers, osc.property, value);
-                    Object.assign(newModifiers, updatedModifiers);
+                    const relativePath = osc.property.substring('modifiers.'.length);
+                    // Update the current state for this key immutably for this frame's calculations
+                    currentModifiers = setNestedProperty(currentModifiers, relativePath, value);
                     needsUpdate = true;
                 }
             }
             if (needsUpdate) {
-                updates[key] = newModifiers;
+                if (!updates) updates = {};
+                updates[key] = currentModifiers;
             }
         }
         
-        if (Object.keys(updates).length > 0) {
+        if (updates) {
             setObjectModifiers(prev => ({...prev, ...updates}));
         }
     });
@@ -410,7 +411,7 @@ const SceneContent: React.FC<Viewer3DProps & { objectRefs: ObjectRefs, sceneRef:
     );
 };
 
-const CameraControlsWrapper: React.FC<{ cameraMode: CameraMode, isFlyModeLocked: boolean }> = ({ cameraMode, isFlyModeLocked }) => {
+const CameraControlsWrapper: React.FC<{ cameraMode: CameraMode }> = ({ cameraMode }) => {
     const controls = useRef<TrackballControlsImpl>(null!);
     const { camera, gl } = useThree();
 
@@ -426,7 +427,6 @@ const CameraControlsWrapper: React.FC<{ cameraMode: CameraMode, isFlyModeLocked:
     return (
         <>
             {cameraMode === 'orbit' && <TrackballControls ref={controls} noZoom={false} noPan={false} rotateSpeed={3} />}
-            {cameraMode === 'fly' && !isFlyModeLocked && <div className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-center p-4">Click to lock controls and fly</div>}
         </>
     );
 }
@@ -513,6 +513,14 @@ interface Viewer3DProps {
   relationships: Relationship[];
   onDeleteObject: (key: string) => void;
   logToIDE: (text: string, type: ConsoleLog['type']) => void;
+  // FIX: Added missing props for texture and paint functionality.
+  paintToolState: PaintToolState;
+  setPaintToolState: React.Dispatch<React.SetStateAction<PaintToolState>>;
+  textures: Record<string, { name: string; texture: THREE.Texture; dataUrl: string }>;
+  objectTextureAssignments: Record<string, string>;
+  paintedTextures: Record<string, THREE.CanvasTexture>;
+  onPaintedTextureCreate: (objectKey: string, texture: THREE.CanvasTexture) => void;
+  onPaintedTextureUpdate: (objectKey: string, texture: THREE.CanvasTexture) => void;
 }
 
 
@@ -561,7 +569,7 @@ export const Viewer3D = React.forwardRef<Viewer3DHandle, Viewer3DProps>(
         <Canvas camera={{ position: [0, 10, 50], fov: 50 }}>
           <CameraUIController ref={cameraControllerRef} />
           <SceneContent {...props} objectRefs={objectRefs} sceneRef={sceneRef} />
-          <CameraControlsWrapper cameraMode={props.cameraMode} isFlyModeLocked={isFlyModeLocked} />
+          <CameraControlsWrapper cameraMode={props.cameraMode} />
            {props.cameraMode === 'fly' && <FirstPersonControls movementSpeed={20} onLock={() => setIsFlyModeLocked(true)} onUnlock={() => setIsFlyModeLocked(false)} />}
         </Canvas>
         <ViewerUI 
@@ -570,6 +578,14 @@ export const Viewer3D = React.forwardRef<Viewer3DHandle, Viewer3DProps>(
             onResetCamera={handleResetCamera}
             onZoom={handleZoom}
         />
+        {props.cameraMode === 'fly' && !isFlyModeLocked && (
+            <div 
+                className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-center p-4 pointer-events-none"
+                aria-hidden="true"
+            >
+                Click to lock controls and fly
+            </div>
+        )}
       </div>
     );
   }

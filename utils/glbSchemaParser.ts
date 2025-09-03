@@ -25,8 +25,12 @@ const padBuffer = (data: Uint8Array, paddingChar = 0x20): Uint8Array => {
  * @param schema The schema object to serialize.
  * @returns An ArrayBuffer containing the GLB file data.
  */
-export const writeGlb = (schema: OntologicalSchema): ArrayBuffer => {
-  const jsonString = JSON.stringify(schema);
+export const writeGlb = (schema: Omit<OntologicalSchema, 'mooseVersion'>): ArrayBuffer => {
+  const schemaWithVersion: OntologicalSchema = {
+    mooseVersion: '1.0',
+    ...schema,
+  };
+  const jsonString = JSON.stringify(schemaWithVersion);
   const jsonEncoder = new TextEncoder();
   const jsonData = padBuffer(jsonEncoder.encode(jsonString));
 
@@ -109,11 +113,13 @@ export const readGlb = (arrayBuffer: ArrayBuffer): Promise<OntologicalSchema> =>
 
     try {
       const parsed = JSON.parse(jsonString);
-      // Basic validation
-      if (!parsed.relationshipMatrix || typeof parsed.relationshipMatrix !== 'object') {
-        return reject(new Error('Invalid schema: `relationshipMatrix` not found or is not an object.'));
+      // Check for MOOSE signature
+      if (parsed.mooseVersion === '1.0' && parsed.relationshipMatrix && typeof parsed.relationshipMatrix === 'object') {
+        resolve(parsed as OntologicalSchema);
+      } else {
+        // It's valid JSON, but not our schema (likely a standard glTF scene definition).
+        reject(new Error('Not a MOOSE ontology file: signature missing.'));
       }
-      resolve(parsed as OntologicalSchema);
     } catch (e) {
       reject(new Error('Failed to parse JSON content from GLB file.'));
     }

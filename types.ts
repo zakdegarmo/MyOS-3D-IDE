@@ -92,6 +92,7 @@ export interface ConsoleLog {
   id: number;
   text: string;
   type: 'in' | 'out' | 'error' | 'info' | 'success' | 'system' | 'ai' | 'source';
+  status?: 'thinking';
 }
 
 export type EditingRelation = {
@@ -105,6 +106,21 @@ export interface Integration {
   title: string;
   url: string;
 }
+
+// --- Textures & Painting ---
+export interface TextureInfo {
+    id: string;
+    name: string;
+    dataUrl: string; // base64 data URL
+}
+
+export interface PaintToolState {
+    enabled: boolean;
+    color: string;
+    size: number;
+    opacity: number;
+}
+
 
 // --- Project Save/Load Types ---
 
@@ -132,10 +148,14 @@ export interface ProjectState {
     customScripts: Record<string, string>;
     ontologicalMatrix: Record<string, Record<string, string>>;
     integrations: Integration[];
+    textures: TextureInfo[];
+    objectTextureAssignments: Record<string, string>; // objectId -> textureId
+    objectPaintedTextures: Record<string, string>; // objectId -> base64 dataUrl of painted texture
 }
 
 // --- Ontology Schema for GLB serialization ---
 export interface OntologicalSchema {
+  mooseVersion?: '1.0';
   relationshipMatrix: Record<string, Record<string, string>>;
   customScripts: Record<string, string>;
 }

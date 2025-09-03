@@ -1,5 +1,6 @@
+
 const express = require('express');
-const cors = require('cors');
+const cors =require('cors');
 const path = require('path');
 const fs = require('fs').promises;
 const { spawn } = require('child_process');
@@ -8,18 +9,25 @@ const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const { GoogleGenAI } = require("@google/genai");
 const { knowledgeBase } = require('./knowledgeBase');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = 3001;
 const PROJECTS_DIR = path.join(__dirname, 'projects');
 const WORKSPACES_DIR = path.join(__dirname, 'workspaces');
+const APP_URL = process.env.APP_URL || 'http://localhost:5173'; // Fallback for dev
+
+// --- In-memory configuration for the external auth service ---
+let serverlessAuthEndpoint = null;
 
 
 // --- Middleware ---
-app.use(cors());
+app.use(cors({
+    origin: APP_URL,
+    credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(fileUpload());
-
 
 // --- Gemini AI Initialization ---
 let ai;
@@ -94,6 +102,29 @@ const ensureDir = async (dir) => {
 console.log('[MyOS Server] Initializing a clean, functional backend...');
 
 // --- API Endpoints ---
+
+// --- Authentication Configuration Endpoints ---
+app.post('/api/config/auth-endpoint', (req, res) => {
+    const { endpointUrl } = req.body;
+    if (endpointUrl === null || endpointUrl === '') {
+        serverlessAuthEndpoint = null;
+        console.log(`[Server Config] Serverless auth endpoint cleared.`);
+        res.status(200).json({ success: true, message: 'Endpoint cleared.' });
+    } else if (typeof endpointUrl === 'string' && (endpointUrl.startsWith('http://') || endpointUrl.startsWith('https://'))) {
+        serverlessAuthEndpoint = endpointUrl;
+        console.log(`[Server Config] Serverless auth endpoint set to: ${serverlessAuthEndpoint}`);
+        res.status(200).json({ success: true, message: 'Endpoint configured.' });
+    } else {
+        res.status(400).json({ success: false, message: 'Invalid URL provided.' });
+    }
+});
+
+app.get('/api/config/auth-endpoint', (req, res) => {
+    res.json({ endpointUrl: serverlessAuthEndpoint });
+});
+
+
+// --- Other API Endpoints ---
 
 app.post('/api/ai-query', async (req, res) => {
     if (!ai) {
@@ -298,6 +329,30 @@ app.post('/api/execute-bun', (req, res) => {
             res.end();
         }
     });
+});
+
+/**
+ * POST /api/ide-command
+ * A generic endpoint to receive commands from the IDE front-end.
+ * For now, it just logs the command, but it's a placeholder for future backend-to-service interactions.
+ */
+app.post('/api/ide-command', (req, res) => {
+    const { targetUrl, command, payload } = req.body;
+    
+    if (!targetUrl || !command) {
+        return res.status(400).json({ success: false, message: 'Missing targetUrl or command.' });
+    }
+
+    console.log(`[IDE Command] Received command for ${targetUrl}`);
+    console.log(`[IDE Command] Command: ${command}`);
+    console.log(`[IDE Command] Payload:`, payload);
+
+    // In the future, this is where you'd add logic to, for example:
+    // - Use Puppeteer to interact with the targetUrl
+    // - Forward the command to another API
+    // - Trigger a webhook
+
+    res.status(200).json({ success: true, message: 'Command received and logged by server.' });
 });
 
 

@@ -1,3 +1,4 @@
+
 import { ProjectState } from '../types';
 
 const BASE_URL = '/api';
@@ -129,6 +130,56 @@ class BackendService {
             throw new Error(errorMessage);
         }
     }
+
+    /**
+     * Sends a generic command from the IDE to the backend for processing.
+     * This is intended for future use where the backend can interact with other services.
+     * @param commandData An object containing the target URL, command, and payload.
+     */
+    public async sendIdeCommand(commandData: { targetUrl: string; command: string; payload: any }): Promise<{ success: boolean; message: string }> {
+        try {
+            const response = await fetch(`${BASE_URL}/ide-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(commandData),
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server responded with ${response.status}: ${errorText}`);
+            }
+            
+            return response.json();
+        } catch (error: any) {
+             console.error('[BackendService] IDE Command error:', error);
+            const errorMessage = error.message.includes('Failed to fetch')
+              ? 'IDE Command failed. Could not connect to the backend server.'
+              : error.message;
+            throw new Error(errorMessage);
+        }
+    }
+
+    // --- Authentication Configuration ---
+
+    public async setAuthEndpoint(endpointUrl: string): Promise<{ success: boolean; message: string }> {
+      const response = await fetch(`${BASE_URL}/config/auth-endpoint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpointUrl }),
+      });
+      if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to set auth endpoint: ${errorText}`);
+      }
+      return response.json();
+    }
+
+    public async getAuthEndpoint(): Promise<{ endpointUrl: string | null }> {
+        const response = await fetch(`${BASE_URL}/config/auth-endpoint`);
+        if (!response.ok) throw new Error('Failed to get auth endpoint configuration.');
+        return response.json();
+    }
+
 
     // --- Workspace and Project Management ---
 

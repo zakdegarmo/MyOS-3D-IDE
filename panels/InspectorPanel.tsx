@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { Button } from '../components/Button';
 import { Slider } from '../components/Slider';
 import { LinkIcon, ModifiersIcon, SlidersIcon, TransformIcon } from '../components/icons';
-import { TransformState, ModifiersState, Relationship, ObjectGeometrySettings, ExtrudeSettings, PrimitiveObject, Oscillator } from '../types';
+// FIX: Added PaintToolState to the type imports to support paint functionality.
+import { TransformState, ModifiersState, Relationship, ObjectGeometrySettings, ExtrudeSettings, PrimitiveObject, Oscillator, PaintToolState } from '../types';
 import { OscillatorsPanel } from './OscillatorsPanel';
 
 interface InspectorPanelProps {
@@ -25,6 +26,12 @@ interface InspectorPanelProps {
     relationships: Relationship[];
     setRelationships: React.Dispatch<React.SetStateAction<Relationship[]>>;
     isLoading: boolean;
+    // FIX: Added missing props for texture and paint functionality.
+    textures: Record<string, { name: string; texture: THREE.Texture; dataUrl: string }>;
+    objectTextureAssignments: Record<string, string>;
+    onAssignTexture: (objectKeys: string[], textureId: string | null) => void;
+    paintToolState: PaintToolState;
+    setPaintToolState: React.Dispatch<React.SetStateAction<PaintToolState>>;
 }
 
 
